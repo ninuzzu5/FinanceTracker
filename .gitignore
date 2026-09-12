@@ -1,0 +1,35 @@
+# Dependencies and build output
+node_modules/
+dist/
+coverage/
+.vite/
+.vercel/
+
+# Secrets: examples are explicitly allowed
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Personal financial data and private training material
+exports/
+private-data/
+model/data/private/
+*.bank.csv
+*.notion.csv
+
+# Generated model artifacts must be reviewed before publishing
+model/artifacts/
+
+# Local databases and logs
+*.db
+*.sqlite
+*.sqlite3
+*.log
+
+# Editors and operating systems
+.DS_Store
+.idea/
+.vscode/
+*.swp

@@ -1,0 +1,19 @@
+{
+  "name": "finance-tracker",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Privacy-first personal finance tracker powered by a Telegram bot and a realtime dashboard.",
+  "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build -w @finance-tracker/domain && npm run build -w @finance-tracker/bot",
+    "test": "npm run test --workspaces --if-present",
+    "typecheck": "npm run build -w @finance-tracker/domain && npm run typecheck --workspaces --if-present"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
