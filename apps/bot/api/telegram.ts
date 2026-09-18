@@ -1,8 +1,9 @@
 import {
   decideUpdate,
   secretsMatch,
-  type TelegramUpdate,
 } from "../src/telegram.js";
+import { readBotConfig } from "../src/config.js";
+import { TelegramClient } from "../src/transport.js";
 
 interface ServerlessRequest {
   method?: string;
@@ -20,19 +21,6 @@ function requiredEnv(name: string): string {
   const value = process.env[name];
   if (!value) throw new Error(`Missing required environment variable: ${name}`);
   return value;
-}
-
-async function sendTelegramMessage(chatId: number, text: string): Promise<void> {
-  const token = requiredEnv("TELEGRAM_BOT_TOKEN");
-  const response = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ chat_id: chatId, text }),
-  });
-
-  if (!response.ok) {
-    throw new Error(`Telegram sendMessage failed with status ${response.status}`);
-  }
 }
 
 export default async function handler(
@@ -54,13 +42,15 @@ export default async function handler(
     return;
   }
 
-  const decision = decideUpdate(req.body as TelegramUpdate, {
-    allowedChatId: requiredEnv("TELEGRAM_ALLOWED_CHAT_ID"),
-    webhookSecret,
+  const config = readBotConfig();
+  const decision = decideUpdate(req.body, {
+    allowedChatId: config.allowedChatId,
+    messageConfig: config,
   });
 
-  if (decision.kind === "reject" || decision.kind === "preview") {
-    await sendTelegramMessage(decision.chatId, decision.reply);
+  if (decision.kind !== "ignore") {
+    // Let Telegram retry the webhook on failure; keep within the serverless time budget.
+    await new TelegramClient(config.token, { maxAttempts: 1, timeoutMs: 5000 }).sendMessage(decision.chatId, decision.reply);
   }
 
   // Telegram only needs a fast acknowledgement; no personal message is logged.

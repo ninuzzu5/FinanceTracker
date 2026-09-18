@@ -9,6 +9,7 @@
     "packages/*"
   ],
   "scripts": {
+    "bot:dev": "npm run build && node apps/bot/dist/src/local.js",
     "build": "npm run build -w @finance-tracker/domain && npm run build -w @finance-tracker/bot",
     "test": "npm run test --workspaces --if-present",
     "typecheck": "npm run build -w @finance-tracker/domain && npm run typecheck --workspaces --if-present"

@@ -1,4 +1,5 @@
 import { parseMessage, type ParsedMessage } from "@finance-tracker/domain";
+import { readMessageConfig, type MessageConfig } from "./config.js";
 
 export interface AcceptedMessage {
   ok: true;
@@ -12,11 +13,11 @@ export interface RejectedMessage {
 
 export type ProcessMessageResult = AcceptedMessage | RejectedMessage;
 
-export function processMessage(text: string, now = new Date()): ProcessMessageResult {
+export function processMessage(text: string, now = new Date(), config: MessageConfig = readMessageConfig()): ProcessMessageResult {
   const parsed = parseMessage(text, {
     now,
-    timeZone: process.env.APP_TIMEZONE ?? "Europe/Rome",
-    defaultAccount: "revolut",
+    timeZone: config.timeZone,
+    defaultAccount: config.defaultAccount,
   });
 
   if (parsed.amount === null) {

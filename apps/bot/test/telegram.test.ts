@@ -12,7 +12,7 @@ function messageUpdate(text: string, chatId = 123456): TelegramUpdate {
     message: {
       message_id: 2,
       text,
-      chat: { id: chatId },
+      chat: { id: chatId, type: "private" },
     },
   };
 }
@@ -26,6 +26,37 @@ describe("secretsMatch", () => {
 });
 
 describe("decideUpdate", () => {
+  it.each(["/start", "/help", "/start@niuzzu_bot", "/help@niuzzu_bot", "/start welcome"])("responds to %s", (command) => {
+    expect(decideUpdate(messageUpdate(command), config)).toMatchObject({
+      kind: "help", reply: expect.stringContaining("8,30 tabacco"),
+    });
+  });
+
+  it.each([null, undefined, [], {}, { update_id: 1 },
+    { update_id: 1, message: null }, { update_id: 1, message: { text: "8,30" } },
+    { update_id: 1, message: { message_id: 1, text: 12, chat: { id: 123456, type: "private" } } },
+    { ...messageUpdate("8,30"), update_id: -1 },
+    { ...messageUpdate("8,30"), update_id: 1.5 },
+    messageUpdate(""),
+  ])("ignores malformed or unsupported payload %#", (update) => {
+    expect(decideUpdate(update, config).kind).toBe("ignore");
+  });
+
+  it.each(["group", "supergroup", "channel", undefined])("rejects chat type %s even with the allowed ID", (type) => {
+    const update = messageUpdate("/start");
+    expect(decideUpdate({ ...update, message: { ...update.message, chat: { id: 123456, type } } }, config).kind).toBe("ignore");
+  });
+
+  it("uses the configured timezone and default account in its preview", () => {
+    const result = decideUpdate(messageUpdate("8,30 tabacco"), {
+      allowedChatId: "123456", messageConfig: { timeZone: "America/New_York", defaultAccount: "isybank" },
+    }, new Date("2026-09-18T01:00:00Z"));
+    expect(result).toMatchObject({ kind: "preview", transaction: { date: "2026-09-17", account: "isybank" } });
+    if (result.kind !== "preview") throw new Error("Expected preview");
+    expect(result.reply).toContain("8,30");
+    expect(result.reply).toContain("€");
+    expect(result.reply).toContain("NON è stato salvato");
+  });
   it("ignores messages from chats outside the whitelist", () => {
     expect(decideUpdate(messageUpdate("8,30 tabacco", 999), config)).toEqual({
       kind: "ignore",
