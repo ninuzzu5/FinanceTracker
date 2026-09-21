@@ -2,7 +2,7 @@
 
 Personal finance tracker designed around a low-friction Telegram bot and a realtime web dashboard.
 
-The local bot accepts short messages such as `8,30 tabacco`, extracts amount, date and account, and replies with a preview. **No transaction is saved.** Classification, persistence, budgets and the dashboard are future work.
+The local bot accepts short messages such as `8,30 tabacco`, extracts amount, date and account, classifies type/category with deterministic rules, and replies with a preview. **No transaction is saved.** Persistence, budgets and the dashboard are future work.
 
 ## Project status
 
@@ -21,8 +21,8 @@ Telegram message
 
 - No calls to external AI APIs.
 - Amounts and dates are parsed using deterministic rules.
-- A small local classifier will handle only transaction type and category.
-- Low-confidence predictions require explicit user confirmation.
+- Type and category currently use deterministic rules; a small local classifier may later handle unknown cases.
+- Unknown classifications remain “da confermare”; confirmation buttons are not implemented yet.
 - Transfers affect account balances but never income or expense totals.
 - Personal transactions and secrets never belong in this repository.
 
@@ -134,6 +134,38 @@ Una data riconosciuta ma impossibile (`31/02/2026`) o più espressioni di data (
 Il polling richiede sia `message` sia `edited_message`. Se modifichi il testo di un messaggio nella chat privata autorizzata, il bot lo ricalcola e invia **un nuovo messaggio** con “Anteprima aggiornata, bro”: la precedente risposta resta nella chat. Se la modifica non contiene più un importo valido o introduce una data/conto ambiguo, ricevi la relativa richiesta di chiarimento.
 
 L'offset segue `update_id`, non `message_id`: una modifica ha un nuovo aggiornamento pur riferendosi allo stesso messaggio. La gestione rimane solo in memoria e senza persistenza. Anche il webhook usa la stessa elaborazione; un eventuale webhook registrato con un filtro `allowed_updates` deve includere `edited_message` per ricevere le modifiche. La sua configurazione non viene cambiata automaticamente.
+
+### Classificazione iniziale a regole
+
+Il dominio espone `classifyMessage(text)` con `{ type, category, confidence, source }`. Gli identificatori sono stabili e separati dalle etichette italiane. I tipi definiti restano `expense` (Uscita), `income` (Entrata), `transfer` (Trasferimento); questa versione classifica solo uscite ed entrate e non modifica la modellazione dei trasferimenti.
+
+| ID categoria | Etichetta | Tipo |
+| --- | --- | --- |
+| `groceries` | Spesa | expense |
+| `public_transport` | Mezzi di trasporto | expense |
+| `flights` | Voli | expense |
+| `tobacco` | Tabacco | expense |
+| `sport` | Sport | expense |
+| `leisure` | Svago & uscite | expense |
+| `food` | Cibo | expense |
+| `rent` | Affitto | expense |
+| `personal_care` | Personal Care | expense |
+| `gifts` | Regali | expense / income |
+| `subscriptions` | Abbonamenti | expense |
+| `holidays` | Vacanze | expense |
+| `unexpected` | Imprevisti | expense |
+| `salary` | Stipendio | income |
+| `personal_projects` | Progetti personali | income |
+
+Gli alias iniziali sono in `packages/domain/src/classification-aliases.ts`. Il classificatore normalizza maiuscole, accenti, apostrofi e punteggiatura separatamente dal parser, preservando la grammatica di importi/date. Cerca parole o frasi complete: `bar` non corrisponde a `barca`. Le espressioni specifiche prevalgono sugli alias contenuti: `abbonamento palestra` → Sport, `spesa al ristorante` → Cibo. Evidenze indipendenti in conflitto restano da confermare, senza scegliere la prima corrispondenza.
+
+Spesa indica supermercati, alimentari e prodotti per la casa; Cibo indica bar, ristoranti e pasti fuori. Voli è separato da Mezzi di trasporto e Vacanze: `ryanair` e `volo per vacanza` → Voli, `hotel` → Vacanze. `volo e hotel` contiene due categorie e rimane da confermare. Imprevisti richiede un alias esplicito, non è una categoria residuale.
+
+Per i regali il contesto direzionale prevale sull'oggetto: `regalo per Marco` / `comprato regalo` → Uscita · Regali; `regalo ricevuto` / `mi hanno regalato` / `regalo da Marco` → Entrata · Regali. `regalo 50` → tipo da confermare, categoria Regali. Indicazioni di acquisto e ricezione insieme restano ambigue.
+
+Una corrispondenza completa non in conflitto ha `source: "rule"` e `confidence: 0.98`; è un punteggio convenzionale della regola, non una probabilità statistica. Un risultato incompleto o conflittuale usa `source: "unknown"`, confidenza 0 e almeno un campo `null`; le informazioni comuni alle regole possono restare note. `12 eskere` conserva l'anteprima di importo/data/conto con tipo e categoria “da confermare”. Non sono implementati pulsanti o salvataggi.
+
+Queste sono regole lessicali per messaggi brevi, non comprensione del linguaggio naturale: negazioni, rimborsi e contesti complessi non sono interpretati. Gli alias sono volutamente essenziali. Un futuro classificatore locale potrà intervenire dopo un risultato sconosciuto, estendendo `ClassificationSource` con `model`; non è implementato né addestrato ora e non cambierà importo, data o conto. Nessuna API AI esterna e nessun dato personale nel repository: solo esempi sintetici nei test.
 
 ## Security and privacy
 

@@ -1,9 +1,9 @@
-import { parseMessage, type AccountId, type ParsedMessage } from "@finance-tracker/domain";
+import { classifyMessage, parseMessage, type AccountId, type ClassificationResult, type ParsedMessage } from "@finance-tracker/domain";
 import { readMessageConfig, type MessageConfig } from "./config.js";
 
 export interface AcceptedMessage {
   ok: true;
-  value: ParsedMessage & { amount: number; date: string; account: AccountId };
+  value: ParsedMessage & { amount: number; date: string; account: AccountId; classification: ClassificationResult };
 }
 
 export interface RejectedMessage {
@@ -28,6 +28,9 @@ export function processMessage(text: string, now = new Date(), config: MessageCo
 
   return {
     ok: true,
-    value: { ...parsed, amount: parsed.amount, date: parsed.date, account: parsed.account },
+    value: {
+      ...parsed, amount: parsed.amount, date: parsed.date, account: parsed.account,
+      classification: classifyMessage(parsed.normalizedText),
+    },
   };
 }

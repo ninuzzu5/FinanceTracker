@@ -26,6 +26,21 @@ describe("secretsMatch", () => {
 });
 
 describe("decideUpdate", () => {
+  it.each([
+    ["8,30 tabacco", "Uscita", "Tabacco"],
+    ["50 regalo ricevuto", "Entrata", "Regali"],
+    ["50 regalo", "da confermare", "Regali"],
+    ["12 eskere", "da confermare", "da confermare"],
+  ])("includes classification without rejecting a valid preview: %s", (text, type, category) => {
+    const result = decideUpdate(messageUpdate(text), config, new Date("2026-09-18T12:00:00Z"));
+    expect(result.kind).toBe("preview");
+    if (result.kind !== "preview") throw new Error("Expected preview");
+    expect(result.reply).toContain(`Tipo: ${type}`);
+    expect(result.reply).toContain(`Categoria: ${category}`);
+    expect(result.reply).toContain("18/09/2026");
+    expect(result.reply).toContain("Revolut");
+    expect(result.reply).toContain("non ho salvato nulla");
+  });
   it("recalculates an edited message including its new account", () => {
     const original = messageUpdate("mercoledì barbiere 34€");
     const edited = { update_id: 2, edited_message: { ...original.message, text: "mercoledì barbiere 34€ isybank" } };
@@ -33,6 +48,7 @@ describe("decideUpdate", () => {
     expect(result).toMatchObject({ kind: "preview", transaction: { amount: 34, date: "2026-09-16", account: "isybank" } });
     if (result.kind !== "preview") throw new Error("Expected edited preview");
     expect(result.reply).toContain("Anteprima aggiornata");
+    expect(result.reply).toContain("Categoria: Personal Care");
     expect(result.reply).toContain("non ho salvato nulla");
   });
   it.each(["message", "edited_message"])("rejects missing amounts in %s", (field) => {

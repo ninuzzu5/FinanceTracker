@@ -1,4 +1,5 @@
 import { timingSafeEqual } from "node:crypto";
+import { categoryLabels, transactionTypeLabels } from "@finance-tracker/domain";
 import { processMessage, type ProcessMessageResult } from "./process-message.js";
 import { readMessageConfig, type MessageConfig } from "./config.js";
 
@@ -95,6 +96,7 @@ export function decideUpdate(
         `Senza data uso oggi, senza conto uso ${accountLabels[defaultAccount]}.`,
         "Con /help ritrovi questi esempi.",
         "Se modifichi un messaggio, ti mando una nuova anteprima.",
+        "Provo a riconoscere tipo e categoria; se ho dubbi, li lascio da confermare.",
         "",
         "Per ora ti mostro solo un'anteprima: non salvo ancora nulla.",
       ].join("\n"),
@@ -126,6 +128,7 @@ export function decideUpdate(
     currency: "EUR",
   });
   const date = result.value.date.split("-").reverse().join("/");
+  const classification = result.value.classification;
 
   return {
     kind: "preview",
@@ -137,6 +140,8 @@ export function decideUpdate(
       `💶 ${amount}`,
       `🏦 ${accountLabels[result.value.account]}`,
       `📅 ${date}`,
+      `↔️ Tipo: ${classification.type ? transactionTypeLabels[classification.type] : "da confermare"}`,
+      `🏷️ Categoria: ${classification.category ? categoryLabels[classification.category] : "da confermare"}`,
       "",
       "Solo anteprima: non ho salvato nulla.",
     ].join("\n"),
