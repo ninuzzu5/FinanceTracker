@@ -26,6 +26,35 @@ describe("secretsMatch", () => {
 });
 
 describe("decideUpdate", () => {
+  it("recalculates an edited message including its new account", () => {
+    const original = messageUpdate("mercoledì barbiere 34€");
+    const edited = { update_id: 2, edited_message: { ...original.message, text: "mercoledì barbiere 34€ isybank" } };
+    const result = decideUpdate(edited, config, new Date("2026-09-18T12:00:00Z"));
+    expect(result).toMatchObject({ kind: "preview", transaction: { amount: 34, date: "2026-09-16", account: "isybank" } });
+    if (result.kind !== "preview") throw new Error("Expected edited preview");
+    expect(result.reply).toContain("Anteprima aggiornata");
+    expect(result.reply).toContain("non ho salvato nulla");
+  });
+  it.each(["message", "edited_message"])("rejects missing amounts in %s", (field) => {
+    const result = decideUpdate({ update_id: 2, [field]: messageUpdate("eskere").message }, config, new Date("2026-09-18T12:00:00Z"));
+    expect(result).toMatchObject({ kind: "reject", reason: "missing_or_invalid_amount", reply: expect.stringContaining("importo") });
+    expect(result).not.toHaveProperty("transaction");
+  });
+  it.each([
+    { edited_message: null }, { edited_message: {} },
+    { edited_message: messageUpdate("12", 999).message },
+    { edited_message: { message_id: 2, text: "12", chat: { id: 123456, type: "group" } } },
+    { message: messageUpdate("12").message, edited_message: messageUpdate("34").message },
+    { edited_channel_post: messageUpdate("12").message },
+  ])("ignores malformed, unsupported or unauthorized edits %#", (payload) => {
+    expect(decideUpdate({ update_id: 2, ...payload }, config).kind).toBe("ignore");
+  });
+  it.each([
+    ["31/02/2026 spesa 12", "invalid_or_ambiguous_date", "data"],
+    ["12 revolut isybank", "ambiguous_account", "conto"],
+  ])("explains why %s cannot produce a preview", (text, reason, explanation) => {
+    expect(decideUpdate(messageUpdate(text), config)).toMatchObject({ kind: "reject", reason, reply: expect.stringContaining(explanation) });
+  });
   it.each(["/start", "/help", "/start@niuzzu_bot", "/help@niuzzu_bot", "/start welcome"])("responds to %s", (command) => {
     expect(decideUpdate(messageUpdate(command), config)).toMatchObject({
       kind: "help", reply: expect.stringContaining("8,30 tabacco"),
@@ -55,7 +84,9 @@ describe("decideUpdate", () => {
     if (result.kind !== "preview") throw new Error("Expected preview");
     expect(result.reply).toContain("8,30");
     expect(result.reply).toContain("€");
-    expect(result.reply).toContain("NON è stato salvato");
+    expect(result.reply).toContain("non ho salvato nulla");
+    expect(result.reply).toContain("17/09/2026");
+    expect(result.reply).toContain("Isybank");
   });
   it("ignores messages from chats outside the whitelist", () => {
     expect(decideUpdate(messageUpdate("8,30 tabacco", 999), config)).toEqual({
@@ -77,14 +108,14 @@ describe("decideUpdate", () => {
       decideUpdate(
         messageUpdate("ieri 8,30 tabacco"),
         config,
-        new Date("2026-07-19T12:00:00Z"),
+        new Date("2026-09-18T12:00:00Z"),
       ),
     ).toMatchObject({
       kind: "preview",
       chatId: 123456,
       transaction: {
         amount: 8.3,
-        date: "2026-07-18",
+        date: "2026-09-17",
         account: "revolut",
       },
     });

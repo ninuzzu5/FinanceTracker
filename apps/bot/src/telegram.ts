@@ -1,17 +1,22 @@
 import { timingSafeEqual } from "node:crypto";
 import { processMessage, type ProcessMessageResult } from "./process-message.js";
-import type { MessageConfig } from "./config.js";
+import { readMessageConfig, type MessageConfig } from "./config.js";
+
+const accountLabels = { revolut: "Revolut", isybank: "Isybank" } as const;
+
+export interface TelegramMessage {
+  message_id: number;
+  text?: string;
+  chat: {
+    id: number;
+    type: string;
+  };
+}
 
 export interface TelegramUpdate {
   update_id: number;
-  message?: {
-    message_id: number;
-    text?: string;
-    chat: {
-      id: number;
-      type: string;
-    };
-  };
+  message?: TelegramMessage;
+  edited_message?: TelegramMessage;
 }
 
 export interface TelegramConfig {
@@ -22,7 +27,7 @@ export interface TelegramConfig {
 export type UpdateDecision =
   | { kind: "ignore"; reason: "unsupported_update" | "unauthorized_chat" }
   | { kind: "help"; chatId: number; reply: string }
-  | { kind: "reject"; chatId: number; reason: "missing_or_invalid_amount"; reply: string }
+  | { kind: "reject"; chatId: number; reason: Extract<ProcessMessageResult, { ok: false }>["reason"]; reply: string }
   | {
       kind: "preview";
       chatId: number;
@@ -58,11 +63,12 @@ export function decideUpdate(
   config: TelegramConfig,
   now = new Date(),
 ): UpdateDecision {
-  if (updateId(update) === undefined || !isRecord(update) || !isRecord(update.message)) {
+  if (updateId(update) === undefined || !isRecord(update) || ("message" in update && "edited_message" in update)) {
     return { kind: "ignore", reason: "unsupported_update" };
   }
-  const message = update.message;
-  if (!Number.isSafeInteger(message.message_id) || !isRecord(message.chat) ||
+  const edited = "edited_message" in update;
+  const message = edited ? update.edited_message : update.message;
+  if (!isRecord(message) || !Number.isSafeInteger(message.message_id) || !isRecord(message.chat) ||
       !Number.isSafeInteger(message.chat.id) || typeof message.text !== "string" || !message.text.trim()) {
     return { kind: "ignore", reason: "unsupported_update" };
   }
@@ -72,14 +78,25 @@ export function decideUpdate(
   }
 
   const chatId = message.chat.id as number;
-  if (/^\/(start|help)(?:@niuzzu_bot)?(?:\s|$)/i.test(message.text.trim())) {
+  const command = /^\/(start|help)(?:@niuzzu_bot)?(?:\s|$)/i.exec(message.text.trim());
+  if (command) {
+    const { defaultAccount } = config.messageConfig ?? readMessageConfig();
     return {
       kind: "help", chatId,
       reply: [
-        "Ciao! FinanceTracker mostra un'anteprima dei tuoi movimenti.",
-        "Esempi: 8,30 tabacco · ieri 12,50 spesa · 20 benzina isybank",
-        "Usa /help per rivedere questi esempi.",
-        "Nessun movimento viene salvato in questa versione.",
+        command[1].toLowerCase() === "start" ? "Eccoti, bro 👋" : "Promemoria al volo, bro 👇",
+        "",
+        "Scrivimi importo e due parole, al resto ci penso io:",
+        "• 8,30 tabacco",
+        "• ieri 12,50 spesa",
+        "• 20 benzina isybank",
+        "• mercoledì barbiere 34€ isybank",
+        "",
+        `Senza data uso oggi, senza conto uso ${accountLabels[defaultAccount]}.`,
+        "Con /help ritrovi questi esempi.",
+        "Se modifichi un messaggio, ti mando una nuova anteprima.",
+        "",
+        "Per ora ti mostro solo un'anteprima: non salvo ancora nulla.",
       ].join("\n"),
     };
   }
@@ -91,7 +108,16 @@ export function decideUpdate(
       kind: "reject",
       chatId,
       reason: result.reason,
-      reply: "Non trovo un importo valido. Prova, ad esempio: 8,30 tabacco",
+      reply: result.reason === "invalid_or_ambiguous_date"
+        ? "Bro, questa data non è valida oppure ne vedo più di una 👀\nScrivine una sola, per esempio: 10 settembre 2026 tabacco 12€"
+        : result.reason === "ambiguous_account"
+          ? "Bro, qui vedo sia Revolut sia Isybank 👀\nIndicami un solo conto, per esempio: 12€ tabacco isybank"
+          : [
+            "Bro, qui manca un importo valido oppure ne vedo più di uno 👀",
+            "",
+            "Scrivimelo così: 8,30 tabacco",
+            "Va bene anche: ieri 12,50 spesa",
+          ].join("\n"),
     };
   }
 
@@ -99,17 +125,20 @@ export function decideUpdate(
     style: "currency",
     currency: "EUR",
   });
+  const date = result.value.date.split("-").reverse().join("/");
 
   return {
     kind: "preview",
     chatId,
     transaction: result.value,
     reply: [
-      "🧾 Anteprima movimento",
-      `${amount} · ${result.value.account}`,
-      `Data: ${result.value.date}`,
+      edited ? "Anteprima aggiornata, bro 👌" : "Ci sono, bro 👌",
       "",
-      "Il movimento NON è stato salvato.",
+      `💶 ${amount}`,
+      `🏦 ${accountLabels[result.value.account]}`,
+      `📅 ${date}`,
+      "",
+      "Solo anteprima: non ho salvato nulla.",
     ].join("\n"),
   };
 }

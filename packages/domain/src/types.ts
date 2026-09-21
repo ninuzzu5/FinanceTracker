@@ -8,6 +8,6 @@ export interface ParsedMessage {
   originalText: string;
   normalizedText: string;
   amount: number | null;
-  date: string;
-  account: AccountId;
+  date: string | null;
+  account: AccountId | null;
 }

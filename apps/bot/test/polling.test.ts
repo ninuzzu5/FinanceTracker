@@ -1,12 +1,34 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { runPolling } from "../src/polling.js";
 
 const config = { token: "synthetic", allowedChatId: "123456", timeZone: "Europe/Rome", defaultAccount: "revolut" as const };
 const update = (id: number, chatId = 123456) => ({
   update_id: id, message: { message_id: id, text: "8,30 tabacco", chat: { id: chatId, type: "private" } },
 });
+afterEach(() => vi.useRealTimers());
 
 describe("polling", () => {
+  it("processes edits with the same message_id and a new update_id, then advances offset", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-18T12:00:00Z"));
+    const controller = new AbortController();
+    const original = update(20);
+    original.message.text = "mercoledì barbiere 34€";
+    const edited = { update_id: 21, edited_message: { ...original.message, text: "mercoledì barbiere 34€ isybank" } };
+    const client = {
+      call: vi.fn().mockResolvedValueOnce({ url: "" }).mockResolvedValueOnce([original])
+        .mockResolvedValueOnce([edited, edited]).mockResolvedValueOnce([]),
+      sendMessage: vi.fn().mockResolvedValue(undefined),
+    };
+    let cycles = 0;
+    await runPolling(client, config, controller.signal, { sleep: async () => { if (++cycles === 3) controller.abort(); } });
+    expect(client.sendMessage).toHaveBeenCalledTimes(2);
+    expect(client.sendMessage.mock.calls[0][1]).toContain("Revolut");
+    expect(client.sendMessage.mock.calls[1][1]).toContain("Isybank");
+    expect(client.sendMessage.mock.calls[1][1]).toContain("16/09/2026");
+    expect(client.sendMessage.mock.calls[1][1]).toContain("Anteprima aggiornata");
+    expect(client.call.mock.calls.slice(1).map(([, body]) => body.offset)).toEqual([0, 21, 22]);
+  });
   it("advances offsets for processed and ignored updates and skips duplicates in this session", async () => {
     const controller = new AbortController();
     const client = {
@@ -19,8 +41,8 @@ describe("polling", () => {
     await runPolling(client, config, controller.signal, { sleep: async () => { if (++cycles === 2) controller.abort(); } });
     expect(client.call.mock.calls).toEqual([
       ["getWebhookInfo", {}, controller.signal],
-      ["getUpdates", { offset: 0, timeout: 30, allowed_updates: ["message"] }, controller.signal],
-      ["getUpdates", { offset: 13, timeout: 30, allowed_updates: ["message"] }, controller.signal],
+      ["getUpdates", { offset: 0, timeout: 30, allowed_updates: ["message", "edited_message"] }, controller.signal],
+      ["getUpdates", { offset: 13, timeout: 30, allowed_updates: ["message", "edited_message"] }, controller.signal],
     ]);
     expect(client.sendMessage).toHaveBeenCalledTimes(2);
   });

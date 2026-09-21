@@ -18,7 +18,7 @@ export async function runPolling(
   options.onReady?.();
   let offset = 0;
   while (!signal.aborted) {
-    const updates = await client.call("getUpdates", { offset, timeout: 30, allowed_updates: ["message"] }, signal);
+    const updates = await client.call("getUpdates", { offset, timeout: 30, allowed_updates: ["message", "edited_message"] }, signal);
     if (!Array.isArray(updates)) throw new TelegramError("Elenco aggiornamenti Telegram non valido.");
     for (const update of updates) {
       signal.throwIfAborted();

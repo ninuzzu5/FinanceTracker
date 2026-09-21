@@ -72,13 +72,13 @@ Il comando compila il progetto e avvia una singola istanza del bot. Per applicar
 Quando compare “Bot locale attivo”, apri la chat privata con `@niuzzu_bot`:
 
 1. Invia `/start` o `/help`: riceverai una breve guida con esempi.
-2. Invia `8,30 tabacco`: riceverai importo in euro, conto e data, con la dicitura “Il movimento NON è stato salvato”.
+2. Invia `8,30 tabacco`: riceverai una risposta personale con importo in euro, conto e data in formato giorno/mese/anno, con la dicitura “Solo anteprima: non ho salvato nulla”.
 3. Invia `ciao`: riceverai una richiesta di importo valido e un esempio.
 4. Puoi anche provare `ieri 12,50 spesa` oppure `20 benzina isybank`.
 
 Arresta con **Ctrl+C** nel terminale. Il bot funziona soltanto mentre il programma è acceso e il Mac è connesso; durante stop o sospensione non risponde. Al riavvio può ricevere messaggi ancora in coda su Telegram.
 
-Accetta esclusivamente messaggi testuali della chat privata autorizzata. Le altre chat e gli aggiornamenti non supportati vengono ignorati. Non salva movimenti, categorie, budget o lo stato di elaborazione. Il parser di date/importi mantiene i limiti attuali: riconosce un singolo importo e le date supportate, non interpreta liberamente il linguaggio naturale; una data esplicita impossibile ricade sulla data predefinita.
+Accetta esclusivamente messaggi testuali, nuovi o modificati, della chat privata autorizzata. Le altre chat e gli aggiornamenti non supportati vengono ignorati. Non salva movimenti, categorie, budget o lo stato di elaborazione. Il parser usa la grammatica esplicita documentata sotto, senza interpretazione libera del linguaggio naturale.
 
 L'offset è mantenuto **solo in memoria durante la sessione** e avanza dopo l'elaborazione o lo scarto di un aggiornamento. Non è idempotenza persistente: un arresto prima della conferma dell'offset, oppure un invio riuscito con risposta di rete persa, può produrre una risposta duplicata. La deduplicazione persistente verrà introdotta con il database.
 
@@ -95,6 +95,45 @@ npm test
 npm audit --omit=dev
 npm audit --include=dev
 ```
+
+### Grammatica di importi, date e conti
+
+Ogni messaggio descrive una sola anteprima. Maiuscole, accenti nei giorni della settimana, spazi ripetuti e apostrofi dritti/curvi sono normalizzati.
+
+**Importo:** un solo numero positivo, massimo 7 cifre intere e 2 decimali. Esempi: `12`, `12€`, `12 €`, `€12`, `12 EUR`, `EUR 12`, `8,30`, `8.30`. I componenti delle date e il numero in `N giorni fa` non sono importi. Zero, segni, separatori delle migliaia, precisione eccessiva e più importi vengono rifiutati, senza somme o arrotondamenti impliciti. Non scrivere quantità numeriche aggiuntive: `2 mozzarelle 5€` è ambiguo. `eskere` produce un messaggio di importo mancante, mai un'anteprima.
+
+**Date:** il riferimento è il giorno in cui il bot elabora il messaggio, calcolato in `APP_TIMEZONE` (default `Europe/Rome`), mai nel fuso implicito del computer. Vale anche per messaggi modificati o ricevuti dopo un periodo offline. I giorni vengono sottratti come giorni di calendario, anche nei cambi d'ora legale.
+
+Con riferimento a **venerdì 18 settembre 2026**:
+
+| Espressione | Data risultante |
+| --- | --- |
+| `oggi` / nessuna data | 2026-09-18 |
+| `ieri` | 2026-09-17 |
+| `l'altro ieri`, `l’altro ieri`, `altro ieri`, `avantieri` | 2026-09-16 |
+| `N giorni fa` (N intero ≥ 0), per esempio `3 giorni fa` | 2026-09-15 |
+| `una settimana fa` | 2026-09-11 |
+| `mercoledì` / `mercoledi` | 2026-09-16 |
+| `mercoledì scorso` | 2026-09-16 |
+| `mercoledì prossimo` | 2026-09-23 |
+| `venerdì` / `venerdì scorso` / `venerdì prossimo` | 2026-09-18 / 2026-09-11 / 2026-09-25 |
+| `10/09`, `10-09`, `10/09/2026`, `10-09-2026` | 2026-09-10 |
+| `2026-09-10` (ISO) | 2026-09-10 |
+| `10 settembre`, `10 settembre 2026` | 2026-09-10 |
+
+Sono supportati tutti i sette giorni della settimana, con o senza accenti, e tutti i dodici mesi italiani per esteso. Giorni e mesi numerici possono avere una o due cifre. Un giorno settimanale senza qualificatore è l'occorrenza più recente, incluso oggi; `scorso` è strettamente precedente e `prossimo` strettamente successivo.
+
+Senza anno si usa sempre l'anno del riferimento: `31/12` a settembre significa dicembre dello stesso anno, senza scegliere automaticamente l'anno passato. Per compatibilità restano validi gli anni italiani a due cifre, interpretati come 2000–2099 (`10/09/26`). Gli anni espliciti a quattro cifre sono validati, così come i giorni del mese e gli anni bisestili. Formati numerici con separatori misti non sono validi.
+
+Una data riconosciuta ma impossibile (`31/02/2026`) o più espressioni di data (`oggi ieri`, anche `mercoledì 16 settembre 2026`) richiedono chiarimento: **non vengono sostituite con oggi**. Le espressioni fuori grammatica non sono interpretate come date; per esempio `domani` non è supportato e rimane testo descrittivo. Se vuoi una data diversa, usa un formato della tabella.
+
+**Conto:** `revolut`, `isybank`, `isy`, `isy bank`, senza distinzione maiuscole/minuscole. Un conto esplicito prevale su `DEFAULT_ACCOUNT`; in sua assenza si usa il default configurato. Se compaiono sia Revolut sia Isybank, il bot chiede un solo conto. I nomi devono essere parole intere, non parti di altre parole. Nessuna interpretazione di trasferimenti tra conti in questa versione.
+
+### Messaggi modificati su Telegram
+
+Il polling richiede sia `message` sia `edited_message`. Se modifichi il testo di un messaggio nella chat privata autorizzata, il bot lo ricalcola e invia **un nuovo messaggio** con “Anteprima aggiornata, bro”: la precedente risposta resta nella chat. Se la modifica non contiene più un importo valido o introduce una data/conto ambiguo, ricevi la relativa richiesta di chiarimento.
+
+L'offset segue `update_id`, non `message_id`: una modifica ha un nuovo aggiornamento pur riferendosi allo stesso messaggio. La gestione rimane solo in memoria e senza persistenza. Anche il webhook usa la stessa elaborazione; un eventuale webhook registrato con un filtro `allowed_updates` deve includere `edited_message` per ricevere le modifiche. La sua configurazione non viene cambiata automaticamente.
 
 ## Security and privacy
 
