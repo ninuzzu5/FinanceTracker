@@ -76,9 +76,10 @@ function resolveExpression(text: string, today: Date): Date | null {
   return null;
 }
 
-export function extractDate(normalizedText: string, now = new Date(), timeZone = "Europe/Rome"): string | null {
+export function extractDate(normalizedText: string, now = new Date(), timeZone = "Europe/Rome", requireDateOnly = false): string | null {
   const today = referenceDate(now, timeZone);
   const expressions = [...normalizedText.matchAll(expressionPattern)];
+  if (requireDateOnly && (expressions.length !== 1 || expressions[0][0] !== normalizedText)) return null;
   if (expressions.length > 1) return null;
   const date = expressions.length ? resolveExpression(expressions[0][0], today) : today;
   return date ? date.toISOString().slice(0, 10) : null;

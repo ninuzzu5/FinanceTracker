@@ -1,5 +1,7 @@
 import type { BotConfig } from "./config.js";
-import { decideUpdate, isRecord, updateId } from "./telegram.js";
+import { isRecord, updateId } from "./telegram.js";
+import { ProposalFlow } from "./proposal-flow.js";
+import { deliverUpdate } from "./flow-delivery.js";
 import { TelegramError, sleep, type Sleep, type TelegramClient } from "./transport.js";
 
 export async function runPolling(
@@ -17,19 +19,23 @@ export async function runPolling(
   }
   options.onReady?.();
   let offset = 0;
-  while (!signal.aborted) {
-    const updates = await client.call("getUpdates", { offset, timeout: 30, allowed_updates: ["message", "edited_message"] }, signal);
-    if (!Array.isArray(updates)) throw new TelegramError("Elenco aggiornamenti Telegram non valido.");
-    for (const update of updates) {
-      signal.throwIfAborted();
-      const id = updateId(update);
-      if (id === undefined || id < offset) continue;
-      const decision = decideUpdate(update, { allowedChatId: config.allowedChatId, messageConfig: config });
-      if (decision.kind !== "ignore") await client.sendMessage(decision.chatId, decision.reply, signal);
-      // Session-only cursor, advanced only after processing (or deliberately ignoring) an update.
-      offset = id + 1;
+  const flow = new ProposalFlow();
+  try {
+    while (!signal.aborted) {
+      const updates = await client.call("getUpdates", { offset, timeout: 30, allowed_updates: ["message", "edited_message", "callback_query"] }, signal);
+      if (!Array.isArray(updates)) throw new TelegramError("Elenco aggiornamenti Telegram non valido.");
+      for (const update of updates) {
+        signal.throwIfAborted();
+        const id = updateId(update);
+        if (id === undefined || id < offset) continue;
+        await deliverUpdate(flow, client, update, { allowedChatId: config.allowedChatId, messageConfig: config }, signal);
+        // Session-only cursor, advanced only after processing (or deliberately ignoring) an update.
+        offset = id + 1;
+      }
+      // Also bounds the request rate if Telegram returns immediately with empty/invalid batches.
+      await (options.sleep ?? sleep)(250, signal);
     }
-    // Also bounds the request rate if Telegram returns immediately with empty/invalid batches.
-    await (options.sleep ?? sleep)(250, signal);
+  } finally {
+    flow.store.clear();
   }
 }

@@ -1,9 +1,14 @@
 import {
-  decideUpdate,
   secretsMatch,
 } from "../src/telegram.js";
 import { readBotConfig } from "../src/config.js";
 import { TelegramClient } from "../src/transport.js";
+import { ProposalFlow } from "../src/proposal-flow.js";
+import { deliverUpdate } from "../src/flow-delivery.js";
+
+// Best-effort warm-process memory only; polling is the supported local workflow.
+const flow = new ProposalFlow();
+let pending: Promise<void> = Promise.resolve();
 
 interface ServerlessRequest {
   method?: string;
@@ -43,15 +48,11 @@ export default async function handler(
   }
 
   const config = readBotConfig();
-  const decision = decideUpdate(req.body, {
-    allowedChatId: config.allowedChatId,
-    messageConfig: config,
-  });
-
-  if (decision.kind !== "ignore") {
-    // Let Telegram retry the webhook on failure; keep within the serverless time budget.
-    await new TelegramClient(config.token, { maxAttempts: 1, timeoutMs: 5000 }).sendMessage(decision.chatId, decision.reply);
-  }
+  const delivery = pending.then(() => deliverUpdate(flow,
+    new TelegramClient(config.token, { maxAttempts: 1, timeoutMs: 2000 }), req.body,
+    { allowedChatId: config.allowedChatId, messageConfig: config }));
+  pending = delivery.catch(() => {});
+  await delivery;
 
   // Telegram only needs a fast acknowledgement; no personal message is logged.
   res.status(200).json({ ok: true });

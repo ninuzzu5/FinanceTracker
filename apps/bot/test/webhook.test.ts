@@ -7,7 +7,7 @@ beforeEach(() => {
   vi.stubEnv("TELEGRAM_WEBHOOK_SECRET", "synthetic-secret");
   vi.stubEnv("APP_TIMEZONE", "Europe/Rome");
   vi.stubEnv("DEFAULT_ACCOUNT", "revolut");
-  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ ok: true, result: {} }))));
+  vi.stubGlobal("fetch", vi.fn().mockImplementation(async () => new Response(JSON.stringify({ ok: true, result: {} }))));
 });
 afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); vi.useRealTimers(); });
 
@@ -15,6 +15,22 @@ const response = () => ({ setHeader: vi.fn(), status: vi.fn().mockReturnThis(), 
 const headers = { "x-telegram-bot-api-secret-token": "synthetic-secret" };
 
 describe("webhook regression", () => {
+  it("shares proposal state between preview and callback in the same process", async () => {
+    await handler({ method: "POST", headers, body: { update_id: 101, message: {
+      message_id: 101, text: "8,30 tabacco", chat: { id: 123456, type: "private" },
+    } } }, response());
+    const initial = JSON.parse(vi.mocked(fetch).mock.calls[0][1]?.body as string);
+    const data = initial.reply_markup.inline_keyboard[0][0].callback_data;
+    await handler({ method: "POST", headers, body: { update_id: 102, callback_query: {
+      id: "synthetic-callback", from: { id: 123456 }, data,
+      message: { message_id: 201, chat: { id: 123456, type: "private" } },
+    } } }, response());
+    const calls = vi.mocked(fetch).mock.calls;
+    expect(calls).toHaveLength(4);
+    expect(JSON.parse(calls[1][1]?.body as string)).toHaveProperty("callback_query_id", "synthetic-callback");
+    expect(JSON.parse(calls[2][1]?.body as string)).toHaveProperty("reply_markup.inline_keyboard", []);
+    expect(JSON.parse(calls[3][1]?.body as string).text).toContain("Nessun salvataggio reale");
+  });
   it("replies to an authorized edit using the corrected date and account", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-09-18T12:00:00Z"));

@@ -14,7 +14,9 @@ A prediction below the configured confidence threshold is not stored as if it we
 
 ## Transfers
 
-A transfer records both a source and a destination account. It changes their balances but is excluded from income, expense and budget calculations.
+A transfer proposal uses `type: "transfer"`, `fromAccount` and `toAccount`, without a single `account` or a category. The domain's discriminated draft union separates transfers from expense/income proposals. Both accounts must be explicitly chosen and different before confirmation; changing type rebuilds the draft without incompatible fields. Parsing and manual editing share this representation.
+
+Proposals are currently memory-only: confirmation neither moves funds nor persists data. Future balance accounting must exclude transfers from income, expense and budget totals; no balance or double-entry implementation exists yet.
 
 ## Realtime dashboard
 

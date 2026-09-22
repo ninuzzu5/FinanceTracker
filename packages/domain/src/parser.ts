@@ -1,5 +1,6 @@
 import type { AccountId, ParsedMessage } from "./types.js";
 import { extractDate, stripDateExpressions } from "./dates.js";
+import { extractTransfer } from "./transfers.js";
 
 export { extractDate } from "./dates.js";
 
@@ -29,6 +30,17 @@ export function extractAmount(normalizedText: string): number | null {
   return Number.isFinite(amount) && amount > 0 ? amount : null;
 }
 
+/** Validate a standalone value in a field-edit prompt, without accepting prose. */
+export function parseAmountInput(input: string): number | null {
+  const text = normalizeText(input);
+  const matches = [...text.matchAll(AMOUNT_PATTERN)];
+  return matches.length === 1 && matches[0][0] === text ? extractAmount(text) : null;
+}
+
+export function parseDateInput(input: string, now = new Date(), timeZone = "Europe/Rome"): string | null {
+  return extractDate(normalizeText(input), now, timeZone, true);
+}
+
 export function extractAccount(
   normalizedText: string,
   defaultAccount: AccountId = "revolut",
@@ -49,6 +61,6 @@ export function parseMessage(input: string, options: ParseOptions = {}): ParsedM
     normalizedText,
     amount: extractAmount(normalizedText),
     date: extractDate(normalizedText, options.now, options.timeZone),
-    account: extractAccount(normalizedText, options.defaultAccount),
+    ...(extractTransfer(normalizedText) ?? { type: null, account: extractAccount(normalizedText, options.defaultAccount) }),
   };
 }

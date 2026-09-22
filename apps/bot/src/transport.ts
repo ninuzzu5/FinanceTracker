@@ -1,5 +1,6 @@
 import { setTimeout as delay } from "node:timers/promises";
 import { isRecord } from "./telegram.js";
+import type { InlineKeyboard } from "./proposal-view.js";
 
 export class TelegramError extends Error {
   constructor(message: string, readonly retryable = false, readonly retryAfterMs = 0) {
@@ -37,12 +38,13 @@ function apiError(code: number, retryAfter: unknown): TelegramError {
 export class TelegramClient {
   constructor(private readonly token: string, private readonly options: TransportOptions = {}) {}
 
-  async call(method: "getUpdates" | "getWebhookInfo" | "sendMessage", body: Record<string, unknown>, signal?: AbortSignal): Promise<unknown> {
-    const attempts = this.options.maxAttempts ?? 5;
+  async call(method: "getUpdates" | "getWebhookInfo" | "sendMessage" | "answerCallbackQuery" | "editMessageReplyMarkup", body: Record<string, unknown>, signal?: AbortSignal): Promise<unknown> {
+    const ancillary = method === "answerCallbackQuery" || method === "editMessageReplyMarkup";
+    const attempts = ancillary ? 1 : this.options.maxAttempts ?? 5;
     for (let attempt = 0; attempt < attempts; attempt++) {
       signal?.throwIfAborted();
       try {
-        const timeout = AbortSignal.timeout(this.options.timeoutMs ?? 40_000);
+        const timeout = AbortSignal.timeout(Math.min(this.options.timeoutMs ?? 40_000, ancillary ? 5000 : 40_000));
         const requestSignal = signal ? AbortSignal.any([signal, timeout]) : timeout;
         const response = await (this.options.fetch ?? fetch)(`https://api.telegram.org/bot${this.token}/${method}`, {
           method: "POST", headers: { "content-type": "application/json" },
@@ -70,7 +72,7 @@ export class TelegramClient {
     throw new TelegramError("Tentativi Telegram esauriti.");
   }
 
-  async sendMessage(chatId: number, text: string, signal?: AbortSignal): Promise<void> {
-    await this.call("sendMessage", { chat_id: chatId, text }, signal);
+  async sendMessage(chatId: number, text: string, signal?: AbortSignal, keyboard?: InlineKeyboard): Promise<void> {
+    await this.call("sendMessage", { chat_id: chatId, text, ...(keyboard ? { reply_markup: keyboard } : {}) }, signal);
   }
 }

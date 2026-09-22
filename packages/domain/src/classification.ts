@@ -1,6 +1,8 @@
 import type { CategoryId } from "./categories.js";
 import { classificationRules, giftRules, normalizeClassificationText, type ClassificationRule } from "./classification-aliases.js";
 import type { TransactionType } from "./types.js";
+import { extractTransfer } from "./transfers.js";
+import { normalizeText } from "./parser.js";
 
 export type ClassificationSource = "rule" | "unknown";
 export interface ClassificationResult {
@@ -45,6 +47,11 @@ function resolve(matches: Match[]): ClassificationResult {
 
 /** Pure rule-based classifier. A future local fallback can consume unknown results. */
 export function classifyMessage(input: string): ClassificationResult {
+  const transfer = extractTransfer(normalizeText(input));
+  if (transfer) {
+    const complete = transfer.fromAccount !== null && transfer.toAccount !== null && transfer.fromAccount !== transfer.toAccount;
+    return { type: "transfer", category: null, confidence: complete ? 0.98 : 0, source: complete ? "rule" : "unknown" };
+  }
   const text = normalizeClassificationText(input);
   const gifts = findMatches(text, giftRules);
   if (gifts.length) return resolve(gifts);

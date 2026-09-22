@@ -92,13 +92,17 @@ export function decideUpdate(
         "• ieri 12,50 spesa",
         "• 20 benzina isybank",
         "• mercoledì barbiere 34€ isybank",
+        "• 100 da revolut a isybank",
         "",
-        `Senza data uso oggi, senza conto uso ${accountLabels[defaultAccount]}.`,
-        "Con /help ritrovi questi esempi.",
+        `Senza data uso oggi; per entrate/uscite senza conto uso ${accountLabels[defaultAccount]}. Per i trasferimenti scrivi entrambi i conti.`,
+        "Con /start o /menu scegli Nuovo movimento o Trasferimento e ti guido passo passo.",
+        "Con /cancel annulli la compilazione o proposta attiva. /menu la chiude e riparte dal menu.",
+        "Con /help ritrovi questi esempi senza interrompere il flusso.",
         "Se modifichi un messaggio, ti mando una nuova anteprima.",
         "Provo a riconoscere tipo e categoria; se ho dubbi, li lascio da confermare.",
+        "Sotto l'anteprima trovi Conferma, Modifica e Annulla. Completa i campi richiesti prima di confermare.",
         "",
-        "Per ora ti mostro solo un'anteprima: non salvo ancora nulla.",
+        "La proposta dura 30 minuti. Anche dopo la conferma non salvo ancora nulla.",
       ].join("\n"),
     };
   }
@@ -110,7 +114,11 @@ export function decideUpdate(
       kind: "reject",
       chatId,
       reason: result.reason,
-      reply: result.reason === "invalid_or_ambiguous_date"
+      reply: result.reason === "same_transfer_accounts"
+        ? "Bro, conto di origine e destinazione devono essere diversi. Prova: 100 da revolut a isybank"
+        : result.reason === "incomplete_transfer"
+          ? "Bro, indica entrambi i conti del trasferimento: da <conto> a <conto>. Per esempio: 100 da revolut a isybank. Non posso scegliere il conto mancante."
+        : result.reason === "invalid_or_ambiguous_date"
         ? "Bro, questa data non è valida oppure ne vedo più di una 👀\nScrivine una sola, per esempio: 10 settembre 2026 tabacco 12€"
         : result.reason === "ambiguous_account"
           ? "Bro, qui vedo sia Revolut sia Isybank 👀\nIndicami un solo conto, per esempio: 12€ tabacco isybank"
@@ -138,10 +146,13 @@ export function decideUpdate(
       edited ? "Anteprima aggiornata, bro 👌" : "Ci sono, bro 👌",
       "",
       `💶 ${amount}`,
-      `🏦 ${accountLabels[result.value.account]}`,
+      ...(result.value.type === "transfer" ? [
+        `Da: ${result.value.fromAccount ? accountLabels[result.value.fromAccount] : "da confermare"}`,
+        `A: ${result.value.toAccount ? accountLabels[result.value.toAccount] : "da confermare"}`,
+      ] : [`🏦 ${result.value.account ? accountLabels[result.value.account] : "da confermare"}`]),
       `📅 ${date}`,
       `↔️ Tipo: ${classification.type ? transactionTypeLabels[classification.type] : "da confermare"}`,
-      `🏷️ Categoria: ${classification.category ? categoryLabels[classification.category] : "da confermare"}`,
+      ...(result.value.type === "transfer" ? [] : [`🏷️ Categoria: ${classification.category ? categoryLabels[classification.category] : "da confermare"}`]),
       "",
       "Solo anteprima: non ho salvato nulla.",
     ].join("\n"),

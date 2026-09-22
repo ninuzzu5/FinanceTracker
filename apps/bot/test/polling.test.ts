@@ -8,6 +8,27 @@ const update = (id: number, chatId = 123456) => ({
 afterEach(() => vi.useRealTimers());
 
 describe("polling", () => {
+  it("routes callback queries from getUpdates and acknowledges them", async () => {
+    const controller = new AbortController();
+    let polls = 0;
+    const client = {
+      call: vi.fn(async (method: string) => {
+        if (method === "getWebhookInfo") return { url: "" };
+        if (method !== "getUpdates") return true;
+        if (++polls === 1) return [update(1)];
+        const keyboard = client.sendMessage.mock.calls[0][3] as { inline_keyboard: { callback_data: string }[][] };
+        return [{ update_id: 2, callback_query: {
+          id: "synthetic-callback", from: { id: 123456 }, data: keyboard.inline_keyboard[0][0].callback_data,
+          message: { message_id: 99, chat: { id: 123456, type: "private" } },
+        } }];
+      }),
+      sendMessage: vi.fn(async (..._args: unknown[]) => {}),
+    };
+    await runPolling(client, config, controller.signal, { sleep: async () => { if (polls === 2) controller.abort(); } });
+    expect(client.sendMessage).toHaveBeenCalledTimes(2);
+    expect(client.sendMessage.mock.calls[1][1]).toContain("Nessun salvataggio reale");
+    expect(client.call).toHaveBeenCalledWith("answerCallbackQuery", expect.objectContaining({ callback_query_id: "synthetic-callback" }), controller.signal);
+  });
   it("processes edits with the same message_id and a new update_id, then advances offset", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-09-18T12:00:00Z"));
@@ -41,8 +62,8 @@ describe("polling", () => {
     await runPolling(client, config, controller.signal, { sleep: async () => { if (++cycles === 2) controller.abort(); } });
     expect(client.call.mock.calls).toEqual([
       ["getWebhookInfo", {}, controller.signal],
-      ["getUpdates", { offset: 0, timeout: 30, allowed_updates: ["message", "edited_message"] }, controller.signal],
-      ["getUpdates", { offset: 13, timeout: 30, allowed_updates: ["message", "edited_message"] }, controller.signal],
+      ["getUpdates", { offset: 0, timeout: 30, allowed_updates: ["message", "edited_message", "callback_query"] }, controller.signal],
+      ["getUpdates", { offset: 13, timeout: 30, allowed_updates: ["message", "edited_message", "callback_query"] }, controller.signal],
     ]);
     expect(client.sendMessage).toHaveBeenCalledTimes(2);
   });

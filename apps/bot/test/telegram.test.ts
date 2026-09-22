@@ -26,6 +26,21 @@ describe("secretsMatch", () => {
 });
 
 describe("decideUpdate", () => {
+  it("previews a transfer without category or single account", () => {
+    const result = decideUpdate(messageUpdate("ieri 100 da revolut a isybank"), config, new Date("2026-09-18T12:00:00Z"));
+    expect(result).toMatchObject({ kind: "preview", transaction: { type: "transfer", amount: 100, date: "2026-09-17", fromAccount: "revolut", toAccount: "isybank" } });
+    if (result.kind !== "preview") throw new Error("Expected preview");
+    expect(result.reply).toContain("Tipo: Trasferimento");
+    expect(result.reply).toContain("Da: Revolut");
+    expect(result.reply).toContain("A: Isybank");
+    expect(result.reply).not.toContain("Categoria:");
+    expect(result.transaction).not.toHaveProperty("account");
+  });
+  it("explains identical transfer accounts", () => {
+    expect(decideUpdate(messageUpdate("100 da revolut a revolut"), config)).toMatchObject({
+      kind: "reject", reason: "same_transfer_accounts", reply: expect.stringContaining("devono essere diversi"),
+    });
+  });
   it.each([
     ["8,30 tabacco", "Uscita", "Tabacco"],
     ["50 regalo ricevuto", "Entrata", "Regali"],

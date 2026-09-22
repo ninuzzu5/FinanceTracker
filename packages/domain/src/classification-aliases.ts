@@ -12,7 +12,7 @@ export const classificationRules: readonly ClassificationRule[] = [
   { type: "expense", category: "groceries", aliases: ["supermercato", "spesa", "conad", "coop", "lidl", "eurospin", "alimentari", "prodotti per la casa"] },
   { type: "expense", category: "public_transport", aliases: ["autobus", "bus", "metro", "treno", "taxi", "uber"] },
   { type: "expense", category: "flights", aliases: ["volo", "aereo", "ryanair", "easyjet", "biglietto aereo", "volo per vacanza"] },
-  { type: "expense", category: "tobacco", aliases: ["tabacco", "tabaccaio", "sigarette", "camel", "iqos"] },
+  { type: "expense", category: "tobacco", aliases: ["tabacco", "tabaccaio", "sigarette", "camel", "marlboro", "cartine", "filtrini"] },
   { type: "expense", category: "sport", aliases: ["palestra", "piscina", "calcetto", "padel", "abbonamento palestra", "abbonamento in palestra", "abbonamento piscina"] },
   { type: "expense", category: "leisure", aliases: ["cinema", "discoteca", "serata", "uscita"] },
   { type: "expense", category: "food", aliases: ["pranzo", "cena", "ristorante", "pizzeria", "bar", "mc", "mcdonald", "mcdonald's", "delivery", "deliveroo", "justeat", "just eat", "spesa al ristorante"] },
