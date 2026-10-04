@@ -3,11 +3,13 @@ import { readMessageConfig } from "./config.js";
 import { decideUpdate, isRecord, updateId, type TelegramConfig } from "./telegram.js";
 import { ProposalStore, categoriesFor, type Proposal } from "./proposals.js";
 import { backKeyboard, choicesKeyboard, fieldKeyboard, proposalKeyboard, proposalText, type InlineKeyboard } from "./proposal-view.js";
+import { PersistenceError, persistenceMessage } from "./persistence.js";
 import { GuidedEntry } from "./wizard.js";
 
 export type FlowEffect =
   | { kind: "send"; chatId: number; text: string; keyboard?: InlineKeyboard }
   | { kind: "answer"; queryId: string; text: string }
+  | { kind: "persist"; chatId: number; messageId: number; proposal: Proposal }
   | { kind: "clearButtons"; chatId: number; messageId: number };
 
 const stale = "Proposta scaduta, chiusa o sostituita. Usa l'ultima anteprima o invia un nuovo messaggio.";
@@ -16,6 +18,7 @@ const preview = (chatId: number, p: Proposal, title?: string) => send(chatId, pr
 
 export class ProposalFlow {
   private readonly guided: GuidedEntry;
+  private readonly saving = new Set<number>();
   constructor(readonly store = new ProposalStore()) { this.guided = new GuidedEntry(store); }
 
   handle(update: unknown, config: TelegramConfig, now = new Date()): FlowEffect[] {
@@ -23,6 +26,7 @@ export class ProposalFlow {
     if ("callback_query" in update) return this.callback(update.callback_query, config, now);
     const decision = decideUpdate(update, config, now);
     if (decision.kind === "ignore") return [];
+    if (this.saving.has(decision.chatId)) return [send(decision.chatId, "Salvataggio in corso, bro. Aspetta la conferma.")];
     const message = (update.message ?? update.edited_message) as { message_id: number; text: string };
     const command = /^\/(start|menu|cancel)(?:@niuzzu_bot)?(?:\s|$)/i.exec(message.text.trim());
     if (command) {
@@ -61,6 +65,19 @@ export class ProposalFlow {
     return [preview(decision.chatId, proposal, p ? `${title}\nQuesta proposta sostituisce la precedente.` : title)];
   }
 
+  completeSave(effect: Extract<FlowEffect, { kind: "persist" }>, error?: unknown): FlowEffect[] {
+    this.saving.delete(effect.chatId);
+    if (error !== undefined) {
+      // Log only an application code, never SDK errors or financial payloads.
+      console.error("Transaction persistence failed", error instanceof PersistenceError ? error.code : "unexpected");
+      const current = this.store.get(effect.chatId);
+      return [send(effect.chatId, persistenceMessage(error)), ...(current ? [preview(effect.chatId, current)] : [])];
+    }
+    this.store.remove(effect.chatId);
+    return [{ kind: "clearButtons", chatId: effect.chatId, messageId: effect.messageId },
+      send(effect.chatId, "✅ Transazione registrata, bro. Salvata nel database.")];
+  }
+
   private callback(query: unknown, config: TelegramConfig, now: Date): FlowEffect[] {
     if (!isRecord(query) || typeof query.id !== "string" || !isRecord(query.from) ||
         !isRecord(query.message) || !isRecord(query.message.chat) || typeof query.data !== "string" ||
@@ -69,6 +86,7 @@ export class ProposalFlow {
     if (chat.type !== "private" || String(chat.id) !== config.allowedChatId ||
         String(query.from.id) !== config.allowedChatId || !Number.isSafeInteger(chat.id)) return [];
     const chatId = chat.id as number;
+    if (this.saving.has(chatId)) return [{ kind: "answer", queryId: query.id, text: "Salvataggio in corso." }];
     if (query.data.startsWith("m:") || query.data.startsWith("w:")) return this.guided.callback(chatId, query.id, query.data, config, now);
     const answer = (text: string): FlowEffect[] => [{ kind: "answer", queryId: query.id as string, text }];
     const match = /^p:([a-f0-9]{16}):(\d+):([a-zA-Z_.]+)$/.exec(query.data);
@@ -82,13 +100,16 @@ export class ProposalFlow {
       if (action === "confirm" && p.type !== "transfer" && (!p.type || !p.account || !categoriesFor(p.type).includes(p.category as CategoryId))) {
         return [...answer("Scegli prima conto, tipo e categoria da Modifica."), preview(chatId, p)];
       }
+      if (action === "confirm") {
+        this.saving.add(chatId);
+        return [{ kind: "answer", queryId: query.id, text: "Salvataggio in corso." },
+          { kind: "persist", chatId, messageId: query.message.message_id as number, proposal: { ...p } }];
+      }
       this.store.remove(chatId);
       return [
-        ...answer(action === "confirm" ? "Confermata, solo in questa sessione." : "Annullata."),
+        ...answer("Annullata."),
         { kind: "clearButtons", chatId, messageId: query.message.message_id as number },
-        send(chatId, action === "confirm"
-          ? "✅ Transazione confermata, bro.\nLa proposta temporanea è stata chiusa. Nessun salvataggio reale: arriverà in una milestone successiva."
-          : "❌ Proposta annullata, bro."),
+        send(chatId, "❌ Proposta annullata, bro."),
       ];
     }
     if (action === "swap") {

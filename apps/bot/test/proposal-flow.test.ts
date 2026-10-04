@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ProposalFlow, type FlowEffect } from "../src/proposal-flow.js";
 import { ProposalStore } from "../src/proposals.js";
+vi.mock("../src/supabase.js", () => ({ supabaseRepository: { saveTransaction: vi.fn().mockResolvedValue({ id: "synthetic-row" }) } }));
 import { deliverUpdate } from "../src/flow-delivery.js";
 
 const config = { allowedChatId: "123456", messageConfig: { timeZone: "Europe/Rome", defaultAccount: "revolut" as const } };
@@ -11,7 +12,11 @@ const callback = (data: string, overrides: object = {}) => ({ update_id: 10, cal
   id: "synthetic-query", from: { id: chatId }, message: { message_id: 99, chat: { id: chatId, type: "private" } }, data, ...overrides,
 } });
 let flow: ProposalFlow;
-const run = (update: unknown) => flow.handle(update, config, now);
+// Unit flow fixtures simulate successful completion; delivery tests cover async persistence.
+const run = (update: unknown) => {
+  const effects = flow.handle(update, config, now);
+  return effects.flatMap(effect => effect.kind === "persist" ? flow.completeSave(effect) : [effect]);
+};
 const click = (action: string) => {
   const p = flow.store.get(chatId)!;
   return run(callback(`p:${p.id}:${p.revision}:${action}`));
@@ -43,7 +48,7 @@ describe("temporary proposal flow", () => {
     const result = run(callback(data));
     expect(flow.store.get(chatId)).toBeUndefined();
     expect(result).toContainEqual({ kind: "clearButtons", chatId, messageId: 99 });
-    expect(sent(result)[0].text).toContain(action === "confirm" ? "Nessun salvataggio reale" : "annullata");
+    expect(sent(result)[0].text).toContain(action === "confirm" ? "Transazione registrata" : "annullata");
     expect(run(callback(data))).toEqual([{ kind: "answer", queryId: "synthetic-query", text: expect.stringContaining("scaduta") }]);
   });
 
@@ -218,6 +223,6 @@ describe("temporary proposal flow", () => {
     await deliverUpdate(flow, client, callback(`p:${p.id}:0:confirm`), config);
     expect(client.call).toHaveBeenCalledWith("answerCallbackQuery", expect.objectContaining({ callback_query_id: "synthetic-query" }), undefined);
     expect(client.call).toHaveBeenCalledWith("editMessageReplyMarkup", expect.objectContaining({ reply_markup: { inline_keyboard: [] } }), undefined);
-    expect(client.sendMessage).toHaveBeenLastCalledWith(chatId, expect.stringContaining("Nessun salvataggio reale"), undefined, undefined);
+    expect(client.sendMessage).toHaveBeenLastCalledWith(chatId, expect.stringContaining("Transazione registrata"), undefined, undefined);
   });
 });

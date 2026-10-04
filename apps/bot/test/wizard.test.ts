@@ -6,7 +6,11 @@ const chatId = 123456;
 const config = { allowedChatId: String(chatId), messageConfig: { timeZone: "Europe/Rome", defaultAccount: "revolut" as const } };
 const now = new Date("2026-09-18T12:00:00Z");
 let flow: ProposalFlow;
-const run = (update: unknown) => flow.handle(update, config, now);
+// Unit flow fixtures simulate successful completion; delivery tests cover async persistence.
+const run = (update: unknown) => {
+  const effects = flow.handle(update, config, now);
+  return effects.flatMap(effect => effect.kind === "persist" ? flow.completeSave(effect) : [effect]);
+};
 const text = (value: string) => run({ update_id: 1, message: { message_id: 1, text: value, chat: { id: chatId, type: "private" } } });
 const callback = (data: string, overrides: object = {}) => run({ update_id: 2, callback_query: {
   id: "synthetic-query", from: { id: chatId }, message: { message_id: 2, chat: { id: chatId, type: "private" } }, data, ...overrides,
@@ -42,7 +46,7 @@ describe("guided entry and menu", () => {
     expect(flow.store.getState(chatId)?.kind).toBe("proposal");
     expect(flow.store.get(chatId)).toMatchObject({ amount: 12.5, type, category: type === "expense" ? "food" : "salary", account: "revolut", date: "2026-09-18", editing: null });
     expect(labels(result)).toEqual(["✅ Conferma", "✏️ Modifica", "❌ Annulla"]);
-    expect(sent(click("confirm"))[0].text).toContain("Nessun salvataggio reale");
+    expect(sent(click("confirm"))[0].text).toContain("Transazione registrata");
     expect(flow.store.getState(chatId)).toBeUndefined();
   });
 

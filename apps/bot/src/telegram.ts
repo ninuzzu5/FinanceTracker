@@ -102,7 +102,7 @@ export function decideUpdate(
         "Provo a riconoscere tipo e categoria; se ho dubbi, li lascio da confermare.",
         "Sotto l'anteprima trovi Conferma, Modifica e Annulla. Completa i campi richiesti prima di confermare.",
         "",
-        "La proposta dura 30 minuti. Anche dopo la conferma non salvo ancora nulla.",
+        "La proposta dura 30 minuti. Salvo nel database solo quando confermi.",
       ].join("\n"),
     };
   }

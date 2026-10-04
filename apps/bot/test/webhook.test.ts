@@ -1,3 +1,4 @@
+vi.mock("../src/supabase.js", () => ({ supabaseRepository: { saveTransaction: vi.fn().mockResolvedValue({ id: "synthetic-row" }) } }));
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import handler from "../api/telegram.js";
 
@@ -29,7 +30,7 @@ describe("webhook regression", () => {
     expect(calls).toHaveLength(4);
     expect(JSON.parse(calls[1][1]?.body as string)).toHaveProperty("callback_query_id", "synthetic-callback");
     expect(JSON.parse(calls[2][1]?.body as string)).toHaveProperty("reply_markup.inline_keyboard", []);
-    expect(JSON.parse(calls[3][1]?.body as string).text).toContain("Nessun salvataggio reale");
+    expect(JSON.parse(calls[3][1]?.body as string).text).toContain("Transazione registrata");
   });
   it("replies to an authorized edit using the corrected date and account", async () => {
     vi.useFakeTimers();

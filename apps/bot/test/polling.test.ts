@@ -1,3 +1,4 @@
+vi.mock("../src/supabase.js", () => ({ supabaseRepository: { saveTransaction: vi.fn().mockResolvedValue({ id: "synthetic-row" }) } }));
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { runPolling } from "../src/polling.js";
 
@@ -26,7 +27,7 @@ describe("polling", () => {
     };
     await runPolling(client, config, controller.signal, { sleep: async () => { if (polls === 2) controller.abort(); } });
     expect(client.sendMessage).toHaveBeenCalledTimes(2);
-    expect(client.sendMessage.mock.calls[1][1]).toContain("Nessun salvataggio reale");
+    expect(client.sendMessage.mock.calls[1][1]).toContain("Transazione registrata");
     expect(client.call).toHaveBeenCalledWith("answerCallbackQuery", expect.objectContaining({ callback_query_id: "synthetic-callback" }), controller.signal);
   });
   it("processes edits with the same message_id and a new update_id, then advances offset", async () => {

@@ -20,7 +20,7 @@ try {
     onRetry: () => console.warn("Telegram non raggiungibile o temporaneamente occupato: nuovo tentativo dopo una pausa."),
   });
   await runPolling(client, config, controller.signal, {
-    onReady: () => console.log("Bot locale attivo. Scrivi su Telegram; Ctrl+C per arrestare. Nessun movimento viene salvato."),
+    onReady: () => console.log("Bot locale attivo. Scrivi su Telegram; Ctrl+C per arrestare. I movimenti vengono salvati solo dopo conferma."),
   });
 } catch (error) {
   if (!controller.signal.aborted) {
