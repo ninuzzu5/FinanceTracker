@@ -11,6 +11,12 @@ coverage/
 !.env.example
 *.pem
 *.key
+*.p12
+*.pfx
+*.keystore
+id_rsa
+id_ed25519
+secrets/
 
 # Personal financial data and private training material
 exports/
@@ -26,6 +32,9 @@ model/artifacts/
 *.db
 *.sqlite
 *.sqlite3
+*.db-journal
+*.sqlite-wal
+*.sqlite-shm
 *.log
 
 # Editors and operating systems

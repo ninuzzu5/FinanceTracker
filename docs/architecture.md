@@ -2,11 +2,11 @@
 
 ## Bot-first delivery
 
-The Telegram flow is the first end-to-end feature because it provides the lowest-friction input method. The web application initially focuses on authentication and visualization.
+The Telegram flow is the first end-to-end feature because it provides the lowest-friction input method. The future web application will initially focus on authentication and visualization.
 
 ## Narrow local classifier
 
-The application does not use a general-purpose language model. A small local classifier is limited to a closed set of transaction types and categories. Amount and date extraction remain deterministic.
+The application does not use a general-purpose language model. The current deterministic classifier uses a closed set of transaction types and categories; a local model is future work. Amount and date extraction remain deterministic.
 
 ## Failure behavior
 
@@ -20,7 +20,7 @@ Proposals remain in memory until confirmation. Confirmation emits a persistence 
 
 ## Realtime dashboard
 
-Supabase is the source of truth. When a transaction is committed, an event updates an open dashboard. A dashboard opened later fetches the current state normally; periodic polling is unnecessary.
+The dashboard and realtime are planned, not implemented. Supabase is the source of truth. In the planned design, when a transaction is committed, an event updates an open dashboard. A dashboard opened later fetches the current state normally; periodic polling is unnecessary.
 
 ## Supabase 02
 

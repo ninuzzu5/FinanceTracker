@@ -4,4 +4,6 @@ Supabase 01 tables, constraints, Auth and RLS already exist in the private datab
 
 The bot uses `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_USER_EMAIL` and `SUPABASE_USER_PASSWORD`. Use the existing dedicated Auth user. Never use a service role key. Keep credentials in the ignored `.env.local` file or private runtime environment.
 
-Only synthetic test fixtures may be committed. Normal tests mock the SDK and never write to the real database. See the Supabase 02 manual checklist in the root README.
+Only synthetic test fixtures may be committed. Normal tests mock the SDK and never write to the real database. See the Supabase 02 manual checklist in [the bot guide](../docs/bot-guide.md).
+
+No SQL migrations, complete table DDL, constraints, RLS enablement or SELECT/INSERT/UPDATE/DELETE policy definitions are versioned here. Their existence was supplied as project context; this audit does not connect to the private database to revalidate them. A fresh clone cannot recreate Supabase 01. Versioning an anonymized schema is separate work; no migrations are invented by the publication audit.

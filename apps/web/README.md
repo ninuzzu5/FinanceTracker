@@ -1,3 +1,3 @@
 # Web dashboard
 
-The Vite + React dashboard will be added after the bot can parse, validate and persist its first transaction end to end.
+The Vite + React dashboard is planned and not implemented. The local Telegram bot already parses, validates and persists confirmed transactions in Supabase. Dashboard authentication, visualization and realtime remain future work.
