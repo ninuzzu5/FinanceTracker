@@ -102,4 +102,4 @@ Non esiste idempotenza persistente: se la risposta del database si perde, verifi
 
 ## Licenza
 
-Non è stata scelta una licenza open source. Tutti i diritti restano riservati finché non viene aggiunta una licenza.
+Il progetto è distribuito con licenza [MIT](LICENSE).
