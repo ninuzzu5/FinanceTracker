@@ -3,8 +3,8 @@
 begin;
 
 alter table public.transactions
-  drop constraint transactions_category_check,
-  add constraint transactions_category_check
+  drop constraint transactions_category_by_type_check,
+  add constraint transactions_category_by_type_check
     check (
       (
         type = 'expense'
