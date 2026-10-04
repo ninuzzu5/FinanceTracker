@@ -1,5 +1,7 @@
 # FinanceTracker
 
+[![CI](https://github.com/ninuzzu5/FinanceTracker/actions/workflows/ci.yml/badge.svg)](https://github.com/ninuzzu5/FinanceTracker/actions/workflows/ci.yml)
+
 FinanceTracker è un progetto personale per registrare spese, entrate e trasferimenti tramite un bot Telegram. TypeScript e Node.js gestiscono parsing, classificazione deterministica e flusso di conferma; Supabase conserva i movimenti con Auth e Row Level Security (RLS).
 
 ## Stato attuale
