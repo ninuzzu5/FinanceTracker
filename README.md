@@ -30,7 +30,7 @@ Con `/start` o `/menu` si apre il flusso guidato; `/help` mostra gli esempi e `/
 
 - `packages/domain`: parser, classificazione a regole, categorie e tipi condivisi. Nessuna API AI esterna.
 - `apps/bot`: flusso Telegram, proposte temporanee in memoria e repository di persistenza.
-- `supabase`: documentazione del database esistente. Schema, constraint e policy RLS **non sono ancora versionati come SQL**.
+- `supabase`: migration SQL di Supabase 01 per schema, constraint e policy RLS, senza seed o dati personali.
 - `apps/web`: documentazione della dashboard futura, senza applicazione implementata.
 - `model`: documentazione del possibile classificatore locale futuro, senza modello addestrato.
 - `docs`: [decisioni architetturali](docs/architecture.md) e [guida del bot con grammatica e collaudo manuale](docs/bot-guide.md).
@@ -65,7 +65,7 @@ Per avviare il bot, copia `.env.example` in `.env.local` e compila privatamente:
 
 `TELEGRAM_WEBHOOK_SECRET` serve soltanto al webhook. Il polling locale carica `.env.local` con il loader nativo di Node; le variabili già presenti nella shell hanno precedenza.
 
-Il progetto Supabase deve già contenere tabelle, constraint, account e policy: questo repository non dispone ancora delle migration per creare un database da zero. Vedi [supabase/README.md](supabase/README.md).
+Per un nuovo database Supabase, le migration creano tabelle, constraint e policy RLS sopra l’infrastruttura Auth già disponibile. Utente Auth e account vanno predisposti privatamente. Non rilanciare la baseline sul progetto esistente. Vedi [supabase/README.md](supabase/README.md) per ordine e prerequisiti.
 
 ```bash
 npm run bot:dev
@@ -96,7 +96,6 @@ Non esiste idempotenza persistente: se la risposta del database si perde, verifi
 
 ## Roadmap
 
-- Versionare lo schema e le policy del database, senza dati personali.
 - Implementare la dashboard web.
 - Aggiungere budget, saldi e statistiche.
 - Valutare realtime e un classificatore locale per i casi non riconosciuti dalle regole.

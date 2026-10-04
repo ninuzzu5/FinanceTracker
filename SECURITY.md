@@ -29,7 +29,7 @@ Before publishing, also review author/committer names and email addresses in com
 - Webhook requests must pass the Telegram webhook secret check. Local polling checks the private chat allowlist instead.
 - Only explicitly associated Telegram chat IDs may create transactions.
 - Every user-owned database table must use Row Level Security. Account lookups select active owned accounts; transaction inserts include the authenticated user ID, with database constraints enforcing account ownership.
-- Database schema, constraints and RLS policies currently live outside this repository and are not independently reproducible from versioned SQL. Do not assume a new database has those protections configured.
+- Supabase 01 application schema, constraints and RLS policies are versioned in `supabase/migrations/`. Apply both migrations in order to a fresh Supabase database before exposing application access; managed Auth infrastructure and private user/account provisioning are separate prerequisites. Do not replay the baseline on the existing database.
 - Tests use synthetic fixtures and mocked services, without real credentials or financial data.
 - Monetary values are validated before persistence; the classifier never modifies an amount.
 
