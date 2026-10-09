@@ -4,7 +4,7 @@ FinanceTracker è un progetto personale per registrare spese, entrate e trasferi
 
 ## Stato attuale
 
-Il bot funziona localmente tramite long polling, in una sola istanza e per una chat privata autorizzata. Supporta testo libero e inserimento guidato. Dashboard, budget, saldi, statistiche e realtime non sono ancora implementati.
+Il bot funziona localmente tramite long polling, in una sola istanza e per una chat privata autorizzata. Supporta testo libero e inserimento guidato. La migrazione 004 prepara saldi iniziali e calcolo SQL dei saldi teorici, con configurazione manuale e nessun nuovo comando Telegram. Dashboard, budget, rettifiche, riconciliazioni, statistiche e realtime non sono ancora implementati.
 
 ```text
 Messaggio o inserimento guidato
@@ -97,7 +97,7 @@ Non esiste idempotenza persistente: se la risposta del database si perde, verifi
 ## Roadmap
 
 - Implementare la dashboard web.
-- Aggiungere budget, saldi e statistiche.
+- Integrare la lettura dei saldi SQL nel bot; aggiungere rettifiche, budget e statistiche.
 - Valutare realtime e un classificatore locale per i casi non riconosciuti dalle regole.
 
 ## Licenza

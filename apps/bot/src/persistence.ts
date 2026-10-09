@@ -1,4 +1,4 @@
-import { accountIds, expenseCategoryIds, incomeCategoryIds, type AccountId, type TransactionDraft } from "@finance-tracker/domain";
+import { accountIds, amountInCents, expenseCategoryIds, incomeCategoryIds, type AccountId, type TransactionDraft } from "@finance-tracker/domain";
 
 export type PersistenceErrorCode = "configuration" | "authentication" | "session" | "accounts_query" | "account_missing" | "mapping" | "insert" | "constraint" | "rls";
 export class PersistenceError extends Error {
@@ -21,7 +21,7 @@ export interface TransactionRepository {
 export function mapTransaction(transaction: TransactionDraft, userId: string, accounts: AccountRow[]): TransactionPayload {
   const { amount, date, type } = transaction;
   const parsedDate = new Date(`${date}T00:00:00Z`);
-  if (!userId || !Number.isFinite(amount) || amount <= 0 || !/^\d{4}-\d{2}-\d{2}$/.test(date) ||
+  if (!userId || amountInCents(amount) === null || amount <= 0 || !/^\d{4}-\d{2}-\d{2}$/.test(date) ||
       !Number.isFinite(parsedDate.getTime()) || parsedDate.toISOString().slice(0, 10) !== date) throw new PersistenceError("mapping");
   const resolve = (account: AccountId | null): string => {
     if (!account || !accountIds.includes(account)) throw new PersistenceError("mapping");

@@ -81,7 +81,7 @@ describe("Supabase transaction persistence", () => {
       expect(() => mapTransaction(expense, user, rows)).toThrow(PersistenceError);
     }
   });
-  it.each([{ ...expense, amount: 0 }, { ...expense, date: "2026-02-30" }, { ...expense, category: "salary" }, { ...expense, type: null }, { type: "transfer", amount: 12.5, date: expense.date, fromAccount: "revolut", toAccount: "revolut" }])("rejects invalid mapping %s", transaction => {
+  it.each([{ ...expense, amount: 0 }, { ...expense, amount: 0.001 }, { ...expense, amount: 0.1 + 0.2 }, { ...expense, amount: Infinity }, { ...expense, date: "2026-02-30" }, { ...expense, category: "salary" }, { ...expense, type: null }, { type: "transfer", amount: 12.5, date: expense.date, fromAccount: "revolut", toAccount: "revolut" }])("rejects invalid mapping %s", transaction => {
     expect(() => mapTransaction(transaction as TransactionDraft, user, accounts)).toThrow(PersistenceError);
   });
 });
