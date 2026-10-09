@@ -32,7 +32,12 @@ try {
     insert into public.accounts (id, user_id, name, type)
       values ('10000000-0000-4000-8000-000000000099', '00000000-0000-4000-8000-000000000099', 'Existing', 'bank');
     insert into public.transactions (user_id, type, amount, transaction_date, category, to_account_id)
-      values ('00000000-0000-4000-8000-000000000099', 'income', 0.001, '2026-09-01', 'salary', '10000000-0000-4000-8000-000000000099');
+      values
+       ('00000000-0000-4000-8000-000000000099', 'income', 0.001, '2026-09-01', 'salary', '10000000-0000-4000-8000-000000000099'),
+       ('00000000-0000-4000-8000-000000000099', 'income', 'NaN', '2026-09-01', 'salary', '10000000-0000-4000-8000-000000000099'),
+       ('00000000-0000-4000-8000-000000000099', 'income', 'Infinity', '2026-09-01', 'salary', '10000000-0000-4000-8000-000000000099'),
+       ('00000000-0000-4000-8000-000000000099', 'income', 1, 'infinity', 'salary', '10000000-0000-4000-8000-000000000099'),
+       ('00000000-0000-4000-8000-000000000099', 'income', 1, '-infinity', 'salary', '10000000-0000-4000-8000-000000000099');
   `);
   const before = (await db.query("select * from public.transactions")).rows;
   await db.exec(await read("../migrations/004_account_openings_and_balances.sql"));
@@ -57,7 +62,30 @@ try {
   console.log(`B1 SQL passed: ${(receipts.match(/select pg_temp\.(check_receipt|receipt_error)/g) ?? []).length} assertions; history unchanged; fixtures rolled back.`);
   const audit = await read("audit_integrity.sql");
   await db.exec(audit);
-  console.log(`Audit SQL: ${(audit.match(/select pg_temp\.audit_(check|error)/g) ?? []).length} assertions passed, including confirmed integrity gaps (not fixed).`);
+  console.log(`Audit SQL: ${(audit.match(/select pg_temp\.audit_(check|error)/g) ?? []).length} assertions passed, including pre-007 B2/B3 characterization (then regression-tested after 007).`);
+  // Failed migration on legacy non-EUR data is atomic, not an implicit conversion.
+  await db.exec(`insert into public.accounts(user_id,name,type,currency) values ('00000000-0000-4000-8000-000000000099','Legacy USD','bank','USD')`);
+  const preflight = await db.exec(await read('../preflight/007_monetary_integrity_and_eur.sql'));
+  assert.equal(preflight.find(result => result.rows[0]?.incompatible_transactions !== undefined).rows[0].incompatible_transactions,5);
+  assert.equal(preflight.find(result => result.rows[0]?.currency === 'USD').rows.length,1);
+  assert.deepEqual((await db.query('select * from public.transactions')).rows,before);
+  await assert.rejects(db.exec(await read('../migrations/007_monetary_integrity_and_eur.sql')), {code:'PT422'});
+  await db.exec('rollback');
+  assert.equal((await db.query("select count(*)::int n from pg_constraint where conname='transactions_money_integrity_check'")).rows[0].n,0);
+  await db.exec("delete from public.accounts where name='Legacy USD'"); // Test-only synthetic fixture, never remote.
+  await db.exec(await read('../preflight/007_monetary_integrity_and_eur.sql'));
+  await db.exec(await read('../migrations/007_monetary_integrity_and_eur.sql'));
+  assert.deepEqual((await db.query('select * from public.transactions')).rows,before);
+  await assert.rejects(db.exec("update public.transactions set category='salary' where amount=0.001"),{code:'23514'});
+  // Make preserved legacy precision relevant: unchanged read guard must still refuse it.
+  await db.exec("update public.accounts set opening_balance=0, opening_date='2026-01-01' where name='Existing'; set role authenticated; select set_config('request.jwt.claim.sub','00000000-0000-4000-8000-000000000099',false)");
+  await assert.rejects(db.exec("select * from public.get_account_balances('2026-09-01')"),{code:'22003'});
+  await db.exec("reset role; select set_config('request.jwt.claim.sub','',false)");
+  await db.exec(fixture);
+  await db.exec(cashFixture);
+  await db.exec(receipts);
+  await db.exec(await read('monetary_integrity_and_eur.sql'));
+  console.log('B2/B3 SQL passed: INSERT/UPDATE, finite amounts/dates, EUR, RLS, preflight/atomic refusal, history unchanged, all three RPC suites rerun.');
   const checks = (fixture.match(/select pg_temp\.(assert_balance|expect_error)/g) ?? []).length;
   console.log(`SQL integration passed: ${checks} balance/error assertions, RLS and migration preservation checks. Fixtures rolled back.`);
 } finally {

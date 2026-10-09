@@ -23,7 +23,7 @@ export function readSupabaseConfig(env: NodeJS.ProcessEnv = process.env): Supaba
 }
 
 function queryError(stage: "accounts_query" | "insert", code?: string): PersistenceError {
-  return new PersistenceError(code === "PT409" ? "conflict" : code === "PT404" ? "account_missing" : code === "22023" ? "mapping" : code === "PGRST202" ? "configuration" : code === "PT423" ? "closed" : code === "42501" ? "rls" : code?.startsWith("23") ? "constraint" : stage);
+  return new PersistenceError(code === "PT422" ? "currency" : code === "PT409" ? "conflict" : code === "PT404" ? "account_missing" : code === "22023" ? "mapping" : code === "PGRST202" ? "configuration" : code === "PT423" ? "closed" : code === "42501" ? "rls" : code?.startsWith("23") ? "constraint" : stage);
 }
 
 export class SupabaseTransactionRepository implements TransactionRepository, ReconciliationRepository {
@@ -75,7 +75,7 @@ export class SupabaseTransactionRepository implements TransactionRepository, Rec
     if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(requestId)) throw new PersistenceError("mapping");
     const { client, userId } = await this.authenticate();
     // Reuse domain validation with conceptual IDs. UUID resolution now occurs inside the atomic RPC.
-    const payload = mapTransaction(transaction, userId, accountIds.map(name => ({ id: name, name, user_id: userId, is_active: true })));
+    const payload = mapTransaction(transaction, userId, accountIds.map(name => ({ id: name, name, user_id: userId, currency: "EUR", is_active: true })));
     const cents = BigInt(amountInCents(payload.amount)!);
     try {
       const { data, error } = await client.rpc("save_transaction_once", { p_request_id: requestId,

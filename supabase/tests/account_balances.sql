@@ -101,18 +101,29 @@ update public.accounts set opening_date = '2026-10-03' where id = '10000000-0000
 select pg_temp.assert_balance('10000000-0000-4000-8000-000000000003', 'configured', -1.25, '2026-10-03');
 update public.accounts set opening_date = '2026-10-01' where id = '10000000-0000-4000-8000-000000000003';
 
+-- Before 007, exercise legacy read defenses. After 007, the same writes must be rejected.
+do $$ begin
+ if not exists (select 1 from pg_constraint where conrelid='public.transactions'::regclass and conname='transactions_money_integrity_check') then
 -- Legacy precision is preserved by the migration, but never silently rounded in balances.
 update public.transactions set amount = 0.001 where id = '30000000-0000-4000-8000-000000000002';
-select pg_temp.expect_error($q$select * from public.get_account_balances('2026-10-01')$q$, '22003');
-select pg_temp.assert_balance('10000000-0000-4000-8000-000000000001', 'before_opening', null, '2026-09-30');
+perform pg_temp.expect_error($q$select * from public.get_account_balances('2026-10-01')$q$, '22003');
+perform pg_temp.assert_balance('10000000-0000-4000-8000-000000000001', 'before_opening', null, '2026-09-30');
 update public.transactions set amount = 'NaN' where id = '30000000-0000-4000-8000-000000000002';
-select pg_temp.expect_error($q$select * from public.get_account_balances('2026-10-01')$q$, '22003');
+perform pg_temp.expect_error($q$select * from public.get_account_balances('2026-10-01')$q$, '22003');
 update public.transactions set amount = 'Infinity' where id = '30000000-0000-4000-8000-000000000002';
-select pg_temp.expect_error($q$select * from public.get_account_balances('2026-10-01')$q$, '22003');
+perform pg_temp.expect_error($q$select * from public.get_account_balances('2026-10-01')$q$, '22003');
 update public.transactions set amount = 0.10 where id = '30000000-0000-4000-8000-000000000002';
 update public.accounts set currency = 'USD' where id = '10000000-0000-4000-8000-000000000003';
-select pg_temp.expect_error($q$select * from public.get_account_balances('2026-10-03')$q$, '22023');
+perform pg_temp.expect_error($q$select * from public.get_account_balances('2026-10-03')$q$, '22023');
 update public.accounts set currency = 'EUR' where id = '10000000-0000-4000-8000-000000000003';
+
+ else
+  perform pg_temp.expect_error($q$update public.transactions set amount=0.001 where id='30000000-0000-4000-8000-000000000002'$q$,'23514');
+  perform pg_temp.expect_error($q$update public.transactions set amount='NaN' where id='30000000-0000-4000-8000-000000000002'$q$,'23514');
+  perform pg_temp.expect_error($q$update public.transactions set amount='Infinity' where id='30000000-0000-4000-8000-000000000002'$q$,'23514');
+  perform pg_temp.expect_error($q$update public.accounts set currency='USD' where id='10000000-0000-4000-8000-000000000003'$q$,'23514');
+ end if;
+end $$;
 
 -- Second authenticated user sees only their own opening and income.
 select set_config('request.jwt.claim.sub', '00000000-0000-4000-8000-000000000002', true);

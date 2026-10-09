@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { mapTransaction, PersistenceError, type AccountRow } from "../src/persistence.js";
+import { mapTransaction, persistenceMessage, PersistenceError, type AccountRow } from "../src/persistence.js";
 import { SupabaseTransactionRepository, readSupabaseConfig } from "../src/supabase.js";
 import { ProposalFlow } from "../src/proposal-flow.js";
 import { deliverUpdate } from "../src/flow-delivery.js";
@@ -10,9 +10,9 @@ vi.mock("@supabase/supabase-js", () => ({ createClient: sdk.createClient }));
 const requestId = "40000000-0000-4000-8000-000000000001";
 const user = "00000000-0000-4000-8000-000000000001";
 const accounts: AccountRow[] = [
-  { id: "00000000-0000-4000-8000-000000000002", user_id: user, name: "Revolut", is_active: true },
-  { id: "00000000-0000-4000-8000-000000000003", user_id: user, name: "Isybank", is_active: true },
-  { id: "00000000-0000-4000-8000-000000000004", user_id: user, name: " Contanti ", is_active: true },
+  { id: "00000000-0000-4000-8000-000000000002", user_id: user, name: "Revolut", currency: "EUR", is_active: true },
+  { id: "00000000-0000-4000-8000-000000000003", user_id: user, name: "Isybank", currency: "EUR", is_active: true },
+  { id: "00000000-0000-4000-8000-000000000004", user_id: user, name: " Contanti ", currency: "EUR", is_active: true },
 ];
 const expense: TransactionDraft = { type: "expense", amount: 12.5, date: "2026-09-18", account: "revolut", category: "food" };
 const credentials = { url: "https://synthetic.example", anonKey: "synthetic-public-key", email: "bot@example.invalid", password: "synthetic-password" };
@@ -35,6 +35,7 @@ function setup(options: { loginError?: boolean; sessionInvalid?: boolean; accoun
       };
       const from = resolve(args.p_from_account), to = resolve(args.p_to_account);
       if (from === undefined || to === undefined) return { data: null, error: { code: "PT404" } };
+      if ((options.rows ?? accounts).some(a => [from, to].includes(a.id) && a.currency !== "EUR")) return { data: null, error: { code: "PT422" } };
       insertQuery.insert({ user_id: user, type: args.p_type, amount: Number(args.p_amount), transaction_date: args.p_date,
         category: args.p_category, from_account_id: from, to_account_id: to });
       const result = await insertQuery.single();
@@ -44,7 +45,7 @@ function setup(options: { loginError?: boolean; sessionInvalid?: boolean; accoun
   sdk.createClient.mockReturnValue(client);
   return { repository: new SupabaseTransactionRepository(() => credentials), client, accountsQuery, insertQuery };
 }
-afterEach(() => { vi.restoreAllMocks(); sdk.createClient.mockReset(); });
+afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); sdk.createClient.mockReset(); });
 
 describe("Supabase transaction persistence", () => {
   it.each([
@@ -70,11 +71,11 @@ describe("Supabase transaction persistence", () => {
   it.each([
     [{ loginError: true }, "authentication"], [{ sessionInvalid: true }, "session"],
     [{ accountsError: "XX000" }, "insert"], [{ rows: [] }, "account_missing"],
-    [{ insertError: "XX000" }, "insert"], [{ insertError: "23514" }, "constraint"], [{ insertError: "42501" }, "rls"], [{ insertError: "PT423" }, "closed"],
+    [{ insertError: "XX000" }, "insert"], [{ insertError: "23514" }, "constraint"], [{ insertError: "42501" }, "rls"], [{ insertError: "PT423" }, "closed"], [{ insertError: "PT422" }, "currency"],
   ] as const)("propagates safe error %s", async (options, code) => {
     const { repository, insertQuery } = setup(options);
     await expect(repository.saveTransaction(expense, requestId)).rejects.toMatchObject({ code, message: `Transaction persistence failed: ${code}` });
-    if (!["insert", "constraint", "rls", "closed"].includes(code)) expect(insertQuery.insert).not.toHaveBeenCalled();
+    if (!["insert", "constraint", "rls", "closed", "currency"].includes(code)) expect(insertQuery.insert).not.toHaveBeenCalled();
   });
   it("reuses valid session and verifies the user before queries", async () => {
     const { repository, client } = setup();
@@ -92,6 +93,30 @@ describe("Supabase transaction persistence", () => {
     expect(() => readSupabaseConfig(env)).toThrow(PersistenceError);
     env.SUPABASE_ANON_KEY = `e30.${Buffer.from(JSON.stringify({ role: "service_role" })).toString("base64url")}.synthetic`;
     expect(() => readSupabaseConfig(env)).toThrow(PersistenceError);
+  });
+  it.each(["USD", "eur", "", undefined])("rejects unsupported account currency %s", currency => {
+    const rows = [{ ...accounts[0], currency }] as AccountRow[];
+    expect(() => mapTransaction(expense, user, rows)).toThrowError(new PersistenceError("currency"));
+    expect(() => mapTransaction({ ...expense, type: "income", category: "salary" }, user, rows)).toThrowError(new PersistenceError("currency"));
+    expect(() => mapTransaction({ type: "transfer", amount: 1, date: expense.date, fromAccount: "isybank", toAccount: "revolut" }, user, [accounts[1], ...rows])).toThrowError(new PersistenceError("currency"));
+  });
+  it("propagates currency rejection from atomic resolution without insertion", async () => {
+    const { repository, insertQuery } = setup({ rows: [{ ...accounts[0], currency: "USD" }] });
+    await expect(repository.saveTransaction(expense, requestId)).rejects.toMatchObject({ code: "currency" });
+    expect(insertQuery.insert).not.toHaveBeenCalled();
+  });
+  it("explains EUR errors without exposing server details", () => {
+    expect(persistenceMessage(new PersistenceError("currency"))).toContain("soltanto conti in EUR");
+  });
+  it.each([NaN, Infinity, -Infinity, -1, 0.001])("rejects invalid amount before RPC %s", async amount => {
+    const { repository, client } = setup();
+    await expect(repository.saveTransaction({ ...expense, amount }, requestId)).rejects.toMatchObject({ code: "mapping" });
+    expect(client.rpc).not.toHaveBeenCalled();
+  });
+  it.each(["infinity", "-infinity", "2026-02-30"])("rejects invalid date before RPC %s", async date => {
+    const { repository, client } = setup();
+    await expect(repository.saveTransaction({ ...expense, date }, requestId)).rejects.toMatchObject({ code: "mapping" });
+    expect(client.rpc).not.toHaveBeenCalled();
   });
   it("rejects missing, inactive, foreign or ambiguous accounts", () => {
     for (const rows of [[], [{ ...accounts[0], is_active: false }], [{ ...accounts[0], user_id: "foreign-user" }], [accounts[0], accounts[0]]]) {
@@ -202,5 +227,19 @@ describe("cash UUID persistence", () => {
       expect(databaseClient.rpc).toHaveBeenCalledWith("save_transaction_once", expect.objectContaining({ p_request_id: expect.any(String) }));
       expect(flow.store.get(123456)).toBeUndefined();
     } finally { flow.store.clear(); }
+  });
+});
+
+describe("accounting day through Telegram and persistence", () => {
+  it.each([["Europe/Rome", "2026-07-10"], ["UTC", "2026-07-09"]])("preserves configured %s date without UTC shifting", async (timeZone, expectedDate) => {
+    const flow = new ProposalFlow();
+    const client = { call: vi.fn().mockResolvedValue(true), sendMessage: vi.fn().mockResolvedValue(undefined) };
+    const { repository, client: db } = setup();
+    const appConfig = { ...config, messageConfig: { timeZone, defaultAccount: "revolut" as const } };
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-09T22:05:00Z"));
+    await deliverUpdate(flow, client, message("12 pranzo oggi revolut"), appConfig, undefined, repository);
+    await deliverUpdate(flow, client, callback(flow, "confirm"), appConfig, undefined, repository);
+    expect(db.rpc).toHaveBeenCalledWith("save_transaction_once", expect.objectContaining({ p_date: expectedDate }));
   });
 });

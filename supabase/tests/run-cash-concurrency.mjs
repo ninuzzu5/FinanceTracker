@@ -37,6 +37,11 @@ try {
   await admin.query(await read('cash_reconciliation.sql'));
   await admin.query(await read('transaction_idempotency.sql'));
   if (process.argv.includes('--audit')) await admin.query(await read('audit_integrity.sql'));
+  await admin.query(await read('../migrations/007_monetary_integrity_and_eur.sql'));
+  await admin.query(await read('account_balances.sql'));
+  await admin.query(await read('cash_reconciliation.sql'));
+  await admin.query(await read('transaction_idempotency.sql'));
+  await admin.query(await read('monetary_integrity_and_eur.sql'));
   await admin.query(`insert into auth.users values ('${user}');
     insert into public.accounts(id,user_id,name,type,opening_balance,opening_date) values
     ('${cash}','${user}','Contanti','cash',100,'2026-01-01'),('${bank}','${user}','Revolut','bank',100,'2026-01-01');`);
@@ -90,6 +95,8 @@ try {
     const {transactionConcurrency}=await import('./transaction-concurrency.mjs');
     await transactionConcurrency({admin,connect,user,cash});
   }
+  const {integrityConcurrency}=await import('./integrity-concurrency.mjs');
+  await integrityConcurrency({admin,connect,user,cash,bank});
   console.log('Native PostgreSQL passed: SQL fixtures, five concurrent lock scenarios, snapshot-isolation rejection. No remote connections.');
 } finally {
   await Promise.allSettled(clients.map(c => c.end()));

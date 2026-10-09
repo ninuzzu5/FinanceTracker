@@ -155,3 +155,33 @@ describe("cash account aliases", () => {
     expect(parseMessage("12 pranzo isybank", { now, defaultAccount: "contanti" }).account).toBe("isybank");
   });
 });
+
+// Calendar dates are local accounting days; timestamps remain instants in UTC.
+describe("Rome midnight and DST boundaries", () => {
+  it.each([
+    ["2026-07-09T21:59:59Z", "2026-07-09"],
+    ["2026-07-09T22:00:00Z", "2026-07-10"],
+    ["2026-01-09T22:59:59Z", "2026-01-09"],
+    ["2026-01-09T23:00:00Z", "2026-01-10"],
+    ["2026-03-28T23:30:00Z", "2026-03-29"],
+    ["2026-03-29T00:59:59Z", "2026-03-29"],
+    ["2026-03-29T01:00:00Z", "2026-03-29"],
+    ["2026-10-25T00:30:00Z", "2026-10-25"],
+    ["2026-10-25T01:30:00Z", "2026-10-25"],
+  ])("uses the local day at %s", (instant, expected) => {
+    expect(parseMessage("12 pranzo oggi", { now: new Date(instant), timeZone: "Europe/Rome" }).date).toBe(expected);
+    expect(parseMessage("12 pranzo", { now: new Date(instant), timeZone: "Europe/Rome" }).date).toBe(expected);
+  });
+  it.each([
+    ["2026-10-09T17:08:00Z", "19:08"],
+    ["2026-01-09T17:08:00Z", "18:08"],
+    ["2026-03-29T00:59:00Z", "01:59"],
+    ["2026-03-29T01:00:00Z", "03:00"],
+    ["2026-10-25T00:30:00Z", "02:30"],
+    ["2026-10-25T01:30:00Z", "02:30"],
+  ])("interprets UTC timestamp %s without changing the stored instant", (instant, display) => {
+    const date = new Date(instant);
+    expect(new Intl.DateTimeFormat("it-IT", { timeZone: "Europe/Rome", hour: "2-digit", minute: "2-digit" }).format(date)).toBe(display);
+    expect(date.toISOString()).toBe(instant.replace("Z", ".000Z"));
+  });
+});

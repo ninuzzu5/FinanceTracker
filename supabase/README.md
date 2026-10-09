@@ -515,3 +515,112 @@ riconciliazione. Include anche il repository e il flusso bot effettivi collegati
 al PostgreSQL locale tramite un SDK sintetico: perdita della risposta post-commit,
 doppia conferma, reset dello stato di processo, replay e modifica della fonte.
 Nessuna connessione remota e nessun uso di credenziali reali.
+
+## B2/B3 — Migrazione 007: integrità monetaria e solo EUR
+
+`migrations/007_monetary_integrity_and_eur.sql` richiede 006 e non modifica le
+migrazioni precedenti. Non aggiorna transazioni, saldi iniziali, timestamp o dati
+storici. Non introduce conversioni, saldo corrente, descrizioni o nuove dipendenze.
+
+### Scelta delle valute
+
+Il prodotto attuale gestisce esclusivamente EUR: dominio/importi non rappresentano
+FX, anteprime Telegram mostrano EUR e la riconciliazione ammette solo EUR.
+`accounts_eur_currency_check` impone esattamente `EUR` a **tutti** i conti, anche
+inattivi e con nomi diversi dai tre conti del bot. È un vincolo validato: 007 si
+ferma atomicamente se trova conti storici non EUR; non li converte o rinomina.
+
+Questo invariante impedisce trasferimenti tra valute differenti e modifiche di
+valuta che invaliderebbero trasferimenti esistenti, anche tramite SQL/REST o in
+concorrenza. Non serve un trigger che confronti due conti con possibili race.
+Un futuro supporto multi-valuta richiederà un modello FX esplicito e una nuova
+migrazione, non la rimozione occasionale del controllo.
+
+La risoluzione UUID resta nella RPC B1: 007 sostituisce soltanto
+`save_transaction_once`, aggiungendo il controllo EUR sui conti risolti (PT422,
+tradotto dal bot in un messaggio italiano). Il controllo è dopo il recupero di
+ricevuta B1, così i replay già riusciti mantengono la loro semantica. La funzione
+mantiene autenticazione, owner filter, search_path vuoto, lock, payload canonico,
+privilegi e atomicità. Anche `mapTransaction` richiede `currency='EUR'`.
+
+### Importi, date e dati storici
+
+I nuovi CHECK su `transactions` richiedono importo strettamente positivo, diverso
+da NaN/±Infinity, uguale a round(amount,2), e `isfinite(transaction_date)`.
+L'importo resta `numeric` senza typmod: **non viene arrotondato**. Gli zeri finali
+(0.290 = 0.29) non sono precisione monetaria aggiuntiva e rimangono consentiti.
+
+I CHECK monetari/date sono `NOT VALID`: applicati immediatamente a **qualsiasi
+INSERT e UPDATE**, inclusi aggiornamenti di altre colonne di una riga storica
+incompatibile. Nessuna riga storica viene riscritta o cancellata; le difese in
+lettura di `get_account_balances` e le validazioni del dominio restano intatte.
+La mancata validazione riguarda solo lo storico e non consente nuove scritture
+invalide. Date infinite storiche possono ancora essere escluse dai saldi finiti:
+non utilizzare tali dati per denaro reale senza prima verificarli.
+
+### Applicazione manuale e preflight
+
+1. Ferma il bot e scegli una finestra senza scritture. Nel progetto corretto apri
+   **SQL Editor** e, con un amministratore fidato, esegui l'intero file
+   `preflight/007_monetary_integrity_and_eur.sql`: è una transazione **READ ONLY**.
+   Riporta solo catalogo, conteggi e identificatori delle righe incompatibili,
+   non testo Telegram, credenziali o dettagli dei messaggi.
+2. Verifica presenza di 006, RLS/ownership/policy coerenti con 001/002/005/006 e
+   assenza dei nuovi vincoli 007. Lo schema e i dati remoti **non sono stati
+   verificati** durante questa task. Se trovi differenze, confrontale prima di
+   procedere; non cancellare oggetti o rilanciare baseline.
+3. Esamina privatamente tutte le righe segnalate. Conti non EUR o trasferimenti
+   tra valute differenti richiedono una decisione contabile esplicita: **fermarsi**,
+   nessun UPDATE automatico di currency. Per movimenti incompatibili, 007 può
+   proteggere nuove scritture preservando lo storico, ma lo storico non diventa
+   corretto applicandola. Non effettuare arrotondamenti o cancellazioni automatiche.
+4. Prova prima su un database di test separato. Quando il preflight è soddisfatto,
+   incolla nel SQL Editor **l'intera migrazione 007**, BEGIN/COMMIT inclusi, una sola
+   volta. In caso di errore esegui ROLLBACK nella sessione; controlla il motivo
+   prima di riprovare. La migrazione non converte dati e non modifica il timezone.
+5. Verifica i tre vincoli e la RPC, aggiorna la cache PostgREST se necessario
+   (`NOTIFY pgrst, 'reload schema';`), esegui build e riavvia il bot aggiornato.
+6. Solo quando il preflight sui movimenti restituisce **zero righe incompatibili**,
+   puoi validare esplicitamente lo storico con:
+
+   ```sql
+   begin;
+   alter table public.transactions validate constraint transactions_money_integrity_check;
+   alter table public.transactions validate constraint transactions_finite_date_check;
+   commit;
+   ```
+
+   Queste istruzioni controllano lo storico senza modificarlo. Se falliscono,
+   esegui ROLLBACK e riesamina i dati; le protezioni sulle nuove scritture restano
+   quelle già installate da 007.
+
+### Date, UTC e limiti
+
+`transaction_date` resta una **data contabile**, calcolata da APP_TIMEZONE
+(default Europe/Rome) e passata alla RPC senza shift UTC. `created_at` resta
+`timestamptz`, un istante: 17:08 UTC = 19:08 a Roma il 9 ottobre 2026.
+Il bot attuale non visualizza created_at/updated_at; per la futura dashboard usare
+un timestamp con offset e formattarlo esplicitamente nel fuso desiderato, non
+aggiungere manualmente due ore. I test verificano mezzanotte estiva/invernale,
+salto primaverile, ora ripetuta autunnale e percorso Telegram→RPC.
+
+Criticità indipendente confermata dal codice: riconciliazione e relativa UI usano
+Europe/Rome fisso, mentre i movimenti consentono APP_TIMEZONE diverso. La
+configurazione predefinita è coerente; un altro fuso può produrre giornate diverse
+vicino a mezzanotte. Non è modificata in questa task. B4/B5/B6 completo restano
+esclusi.
+
+### Test locali
+
+I comandi di verifica rimangono quelli della sezione B1. Il runner in memoria
+prova prima le difese precedenti, poi 007, preflight su storico sintetico invalido,
+fallimento atomico per un conto USD e conservazione integrale delle righe.
+Dopo 007 riesegue saldi, riconciliazione e B1, oltre alla nuova fixture
+`tests/monetary_integrity_and_eur.sql`: INSERT/UPDATE, date infinite, importi
+invalidi, EUR, modifiche conti, trasferimenti, RLS e timestamp. Non disabilita
+alcuna protezione.
+
+Lo stress nativo esegue le gare Contanti e B1 sullo schema 007, poi 25 sessioni con
+212 scritture invalide rifiutate e 13 trasferimenti concorrenti a centesimi,
+verificando patrimonio invariato. I runtime temporanei non sono dipendenze del
+progetto; socket locale, credenziali sintetiche e cluster eliminato alla fine.
