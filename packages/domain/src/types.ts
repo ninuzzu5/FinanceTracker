@@ -1,4 +1,4 @@
-export const accountIds = ["isybank", "revolut"] as const;
+export const accountIds = ["revolut", "isybank", "contanti"] as const;
 export type AccountId = (typeof accountIds)[number];
 
 export const transactionTypes = ["income", "expense", "transfer"] as const;

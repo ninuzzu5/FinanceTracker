@@ -53,7 +53,7 @@ describe("guided entry and menu", () => {
   it("completes a transfer, only offering a different destination", () => {
     start("transfer"); text("100");
     const destinations = click("fromAccount.revolut");
-    expect(labels(destinations)).toEqual(["Isybank", "⬅️ Indietro", "❌ Annulla"]);
+    expect(labels(destinations)).toEqual(["Isybank", "Contanti", "⬅️ Indietro", "❌ Annulla"]);
     expect(click("toAccount.revolut")[0]).toMatchObject({ kind: "answer", text: expect.stringContaining("conti uguali") });
     expect(flow.store.getState(chatId)).toMatchObject({ step: "toAccount", values: { toAccount: null } });
     click("toAccount.isybank");
@@ -157,5 +157,38 @@ describe("guided entry and menu", () => {
     expect(flow.store.getState(chatId)).toBeUndefined();
     const unauthorized = { update_id: 1, message: { message_id: 1, text: "/start", chat: { id: 999, type: "private" } } };
     expect(run(unauthorized)).toEqual([]);
+  });
+});
+
+
+describe("cash guided entry", () => {
+  it.each(["expense", "income"] as const)("collects a cash %s", type => {
+    start(); click(`type.${type}`); text("25");
+    const accounts = click(`category.${type === "expense" ? "food" : "salary"}`);
+    expect(labels(accounts)).toEqual(["Revolut", "Isybank", "Contanti", "⬅️ Indietro", "❌ Annulla"]);
+    click("account.contanti");
+    const preview = click("date.today");
+    expect(flow.store.get(chatId)).toMatchObject({ type, account: "contanti", amount: 25 });
+    expect(sent(preview)[0].text).toContain("🏦 Contanti");
+    expect(flow.store.get(chatId)).not.toHaveProperty("description");
+    click("confirm");
+    expect(flow.store.get(chatId)).toBeUndefined();
+  });
+
+  it.each([
+    ["revolut", "contanti"], ["contanti", "revolut"],
+    ["isybank", "contanti"], ["contanti", "isybank"],
+  ])("collects a transfer from %s to %s", (from, to) => {
+    start("transfer"); text("100");
+    const destinations = click(`fromAccount.${from}`);
+    expect(labels(destinations)).not.toContain(from === "contanti" ? "Contanti" : from === "revolut" ? "Revolut" : "Isybank");
+    expect(click(`toAccount.${from}`)[0]).toMatchObject({ kind: "answer", text: expect.stringContaining("conti uguali") });
+    click(`toAccount.${to}`);
+    const preview = click("date.today");
+    expect(flow.store.get(chatId)).toMatchObject({ type: "transfer", fromAccount: from, toAccount: to });
+    expect(sent(preview)[0].text).toContain("Contanti");
+    expect(sent(preview)[0].text).not.toContain("Categoria:");
+    click("confirm");
+    expect(flow.store.get(chatId)).toBeUndefined();
   });
 });

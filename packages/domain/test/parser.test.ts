@@ -137,3 +137,21 @@ describe("amounts and accounts", () => {
     expect(parseMessage("12 revolut isybank", { now }).account).toBeNull();
   });
 });
+
+
+describe("cash account aliases", () => {
+  it.each(["contanti", "cash", "in contanti", "liquidi", "CONTANTI", "Cash"])("recognizes %s", alias => {
+    expect(parseMessage(`ieri 12 pranzo ${alias}`, { now })).toMatchObject({ account: "contanti", amount: 12, date: "2026-09-17", type: null });
+  });
+  it.each(["cashback", "contantissimo", "liquidità", "cash_foo"])("does not match substrings in %s", alias => {
+    expect(parseMessage(`12 pranzo ${alias}`, { now }).account).toBe("revolut");
+  });
+  it.each(["contanti revolut", "isybank cash", "cash contanti revolut"])("rejects multiple distinct accounts in %s", accounts => {
+    expect(parseMessage(`12 pranzo ${accounts}`, { now }).account).toBeNull();
+  });
+  it("deduplicates aliases of the same account and supports Contanti as default", () => {
+    expect(parseMessage("12 pranzo contanti cash liquidi", { now }).account).toBe("contanti");
+    expect(parseMessage("12 pranzo", { now, defaultAccount: "contanti" }).account).toBe("contanti");
+    expect(parseMessage("12 pranzo isybank", { now, defaultAccount: "contanti" }).account).toBe("isybank");
+  });
+});

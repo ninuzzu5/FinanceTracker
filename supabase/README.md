@@ -14,7 +14,7 @@ Apply the baseline files 001 and 002 once, in order, as part of provisioning a n
 
 The target must already provide Supabase Auth, `auth.users`, `auth.uid()`, the `authenticated` role and `gen_random_uuid()`. These files version the application tables and policies; they do not recreate Supabase's managed Auth infrastructure or project-level Auth settings. The SQL must be applied by a database administrator with the required DDL privileges, separately from normal bot access.
 
-No users, accounts, transactions or seeds are inserted. Real Auth users and account rows must be provisioned privately. Revolut and Isybank are conceptual account names used by the bot; their UUIDs are resolved from active rows owned by the authenticated user, never hardcoded.
+No users, accounts, transactions or seeds are inserted. Real Auth users and account rows must be provisioned privately. Revolut, Isybank and Contanti are conceptual account names used by the bot; their UUIDs are resolved from active rows owned by the authenticated user, never hardcoded.
 
 The schema follows the DDL supplied for Supabase 01, with one reviewed correction: the category CHECK explicitly requires `category IS NOT NULL` for expense/income, together with a category valid for that type. For transfers the category must be NULL and the two accounts must be distinct. The column remains nullable to support transfers; `description` also remains nullable. Category identifiers match the domain taxonomy. No other schema or application behavior is changed.
 
@@ -47,3 +47,47 @@ Real values stay in the ignored `.env.local` file or private runtime environment
 ## Validation
 
 Normal application tests mock the SDK and never contact the real database. See [the bot guide](../docs/bot-guide.md) for manual application checks. The SQL has been reviewed locally against the supplied DDL and domain categories; it has not been executed or validated by a PostgreSQL server in this task. Database policy/isolation execution tests require a separate disposable Supabase environment and are not added to CI here.
+
+
+## Configurazione manuale del conto Contanti
+
+Lo schema verificato è quello versionato in `migrations/001_initial_schema.sql`.
+Non è stata verificata la corrispondenza con il catalogo del database remoto.
+`public.accounts` richiede `user_id`, `name`, `type`; le altre colonne hanno default.
+`type` è testo obbligatorio senza CHECK/enum nello schema locale. Non esistono
+colonne per il saldo iniziale e non occorre modificare lo schema.
+
+Nel progetto Supabase corretto:
+
+1. Apri **Authentication → Users** e individua l'utente Auth usato dal bot
+   (quello configurato privatamente in `SUPABASE_USER_EMAIL`). Copia il suo UUID,
+   non l'ID della chat Telegram. Deve coincidere con il proprietario dei conti esistenti.
+2. Apri **Table Editor → schema public → accounts**. Verifica le colonne e i
+   default contro la tabella seguente, e controlla che per questo utente non
+   esista già un conto attivo chiamato Contanti. Se esiste, non crearne un duplicato.
+3. Se manca, premi **Insert → Insert row**, compila i campi e salva la riga:
+
+| Colonna | Valore |
+| --- | --- |
+| `user_id` | UUID dell'utente Auth dedicato al bot (obbligatorio, senza default) |
+| `name` | `Contanti` (obbligatorio, senza default) |
+| `type` | `cash` (obbligatorio, senza default; valore scelto per un conto di cassa) |
+| `currency` | `EUR` (default) |
+| `is_active` | `true` (default; necessario per la risoluzione del bot) |
+| `id` | Lascia il default `gen_random_uuid()`; non inserire `null` |
+| `created_at` | Lascia il default `now()` |
+| `updated_at` | Lascia il default `now()` |
+
+Per i campi generati mantieni i default nel form, senza impostare NULL esplicitamente.
+Se lo schema remoto presenta vincoli diversi, verifica quei vincoli prima di salvare.
+Il repository abbina `name` ignorando maiuscole/minuscole e spazi esterni; gli alias
+`cash` e `liquidi` sono interpretati solo dal parser e non sono nomi alternativi della
+riga nel database. Serve una sola riga attiva Contanti per il proprietario.
+L'UUID viene risolto a ogni salvataggio: non va aggiunto alla configurazione del bot.
+RLS e vincoli di proprietà restano applicati.
+
+Questa operazione crea soltanto un conto: non inserire transazioni iniziali,
+importi o saldi di apertura. Il bot non crea automaticamente la riga remota.
+
+Riferimenti per l'interfaccia: [inserimento di righe dal Table Editor](https://supabase.com/docs/guides/database/arrays)
+e [utenti Auth nel Dashboard](https://supabase.com/docs/guides/auth/managing-user-data).

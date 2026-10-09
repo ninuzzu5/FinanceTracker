@@ -4,6 +4,9 @@ import { processMessage } from "../src/index.js";
 describe("processMessage", () => {
   it.each([
     ["100 da revolut a revolut", "same_transfer_accounts"],
+    ["100 da cash a contanti", "same_transfer_accounts"],
+    ["100 da liquidi", "incomplete_transfer"],
+    ["12 cash revolut", "ambiguous_account"],
     ["100 da revolut", "incomplete_transfer"],
     ["100 a isybank", "incomplete_transfer"],
     ["100 da n26 a isybank", "incomplete_transfer"],
@@ -29,4 +32,12 @@ describe("processMessage", () => {
       reason: "missing_or_invalid_amount",
     });
   });
+});
+
+
+it.each([
+  ["12 pranzo in contanti", "expense", "food"],
+  ["100 stipendio liquidi", "income", "salary"],
+])("processes cash movement %s", (text, type, category) => {
+  expect(processMessage(text)).toMatchObject({ ok: true, value: { account: "contanti", type, category } });
 });

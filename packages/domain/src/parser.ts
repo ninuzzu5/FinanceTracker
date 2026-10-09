@@ -1,5 +1,6 @@
 import type { AccountId, ParsedMessage } from "./types.js";
 import { extractDate, stripDateExpressions } from "./dates.js";
+import { mentionedAccounts } from "./accounts.js";
 import { extractTransfer } from "./transfers.js";
 
 export { extractDate } from "./dates.js";
@@ -45,12 +46,8 @@ export function extractAccount(
   normalizedText: string,
   defaultAccount: AccountId = "revolut",
 ): AccountId | null {
-  const isybank = /(?<![\p{L}\p{N}_])(?:isybank|isy(?:\s+bank)?)(?![\p{L}\p{N}_])/u.test(normalizedText);
-  const revolut = /(?<![\p{L}\p{N}_])revolut(?![\p{L}\p{N}_])/u.test(normalizedText);
-  if (isybank && revolut) return null;
-  if (isybank) return "isybank";
-  if (revolut) return "revolut";
-  return defaultAccount;
+  const accounts = mentionedAccounts(normalizedText);
+  return accounts.length > 1 ? null : accounts[0] ?? defaultAccount;
 }
 
 export function parseMessage(input: string, options: ParseOptions = {}): ParsedMessage {

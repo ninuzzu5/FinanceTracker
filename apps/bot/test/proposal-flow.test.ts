@@ -80,7 +80,7 @@ describe("temporary proposal flow", () => {
   it("offers existing accounts/types, filters categories and clears incompatible ones", () => {
     run(message("8,30 tabacco"));
     const accounts = sent(click("field.account"))[0].keyboard!.inline_keyboard.flat().map((b) => b.text);
-    expect(accounts).toEqual(["Revolut", "Isybank", "↩️ Anteprima", "❌ Annulla"]);
+    expect(accounts).toEqual(["Revolut", "Isybank", "Contanti", "↩️ Anteprima", "❌ Annulla"]);
     click("set.account.isybank");
     expect(flow.store.get(chatId)?.account).toBe("isybank");
     const types = sent(click("field.type"))[0].keyboard!.inline_keyboard.flat().map((b) => b.text);
@@ -139,7 +139,7 @@ describe("temporary proposal flow", () => {
     expect(flow.store.get(chatId)).not.toHaveProperty("category");
     expect(click("confirm")[0]).toMatchObject({ kind: "answer", text: expect.stringContaining("origine e destinazione") });
     const fromChoices = sent(click("field.fromAccount"))[0].keyboard!.inline_keyboard.flat().map((b) => b.text);
-    expect(fromChoices).toEqual(["Revolut", "Isybank", "↩️ Anteprima", "❌ Annulla"]);
+    expect(fromChoices).toEqual(["Revolut", "Isybank", "Contanti", "↩️ Anteprima", "❌ Annulla"]);
     click("set.fromAccount.revolut");
     // Changing origin while destination is still unchosen is safe.
     click("set.fromAccount.isybank");
@@ -224,5 +224,46 @@ describe("temporary proposal flow", () => {
     expect(client.call).toHaveBeenCalledWith("answerCallbackQuery", expect.objectContaining({ callback_query_id: "synthetic-query" }), undefined);
     expect(client.call).toHaveBeenCalledWith("editMessageReplyMarkup", expect.objectContaining({ reply_markup: { inline_keyboard: [] } }), undefined);
     expect(client.sendMessage).toHaveBeenLastCalledWith(chatId, expect.stringContaining("Transazione registrata"), undefined, undefined);
+  });
+});
+
+
+describe("cash proposal flow", () => {
+  it.each([
+    ["12 pranzo in contanti", "expense", "food"],
+    ["100 stipendio cash", "income", "salary"],
+  ])("previews and confirms %s without adding description", (input, type, category) => {
+    const effects = run(message(input));
+    expect(flow.store.get(chatId)).toMatchObject({ account: "contanti", type, category });
+    expect(flow.store.get(chatId)).not.toHaveProperty("description");
+    expect(sent(effects)[0].text).toContain("🏦 Contanti");
+    const result = click("confirm");
+    expect(sent(result)[0].text).toContain("Transazione registrata");
+    expect(flow.store.get(chatId)).toBeUndefined();
+  });
+
+  it("edits a movement account to Contanti and keeps the confirmation flow", () => {
+    run(message("12 pranzo revolut"));
+    const choices = sent(click("field.account"))[0].keyboard!.inline_keyboard.flat();
+    expect(choices.find(b => b.text === "Contanti")?.callback_data).toMatch(/:set.account.contanti$/);
+    const preview = click("set.account.contanti");
+    expect(flow.store.get(chatId)).toMatchObject({ account: "contanti", category: "food" });
+    expect(sent(preview)[0].text).toContain("🏦 Contanti");
+    click("confirm");
+    expect(flow.store.get(chatId)).toBeUndefined();
+  });
+
+  it("supports transfer editing and swapping with Contanti, rejects identical accounts", () => {
+    const effects = run(message("100 da revolut a cash stipendio"));
+    expect(flow.store.get(chatId)).toMatchObject({ type: "transfer", fromAccount: "revolut", toAccount: "contanti" });
+    expect(flow.store.get(chatId)).not.toHaveProperty("category");
+    expect(sent(effects)[0].text).toContain("A: Contanti");
+    expect(sent(effects)[0].text).not.toContain("Categoria:");
+    click("swap");
+    expect(flow.store.get(chatId)).toMatchObject({ fromAccount: "contanti", toAccount: "revolut" });
+    expect(click("set.toAccount.contanti")[0]).toMatchObject({ kind: "answer", text: expect.stringContaining("devono essere diverse") });
+    click("set.toAccount.isybank");
+    click("confirm");
+    expect(flow.store.get(chatId)).toBeUndefined();
   });
 });

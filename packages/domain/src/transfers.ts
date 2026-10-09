@@ -1,9 +1,9 @@
-import type { AccountId, TransferFields } from "./types.js";
+import { accountIdForAlias, accountPattern } from "./accounts.js";
+import type { TransferFields } from "./types.js";
 
-const account = String.raw`(?:revolut|isybank|isy(?:\s+bank)?)`;
+const account = accountPattern;
 const side = new RegExp(String.raw`(?<![\p{L}\p{N}_])(?<direction>da|a)\s+(?<account>${account})(?![\p{L}\p{N}_])`, "gu");
 const route = new RegExp(String.raw`(?<![\p{L}\p{N}_])da\s+(${account})\s+a\s+(${account})(?![\p{L}\p{N}_])`, "u");
-const id = (value: string): AccountId => value === "revolut" ? "revolut" : "isybank";
 
 /** No default/inferred counterparty, including partial directional input. Text is normalized by the caller. */
 export function extractTransfer(normalizedText: string): TransferFields | null {
@@ -19,7 +19,7 @@ export function extractTransfer(normalizedText: string): TransferFields | null {
   }
   return {
     type: "transfer",
-    fromAccount: from.length === 1 ? id(from[0].groups!.account) : null,
-    toAccount: to.length === 1 ? id(to[0].groups!.account) : null,
+    fromAccount: from.length === 1 ? accountIdForAlias(from[0].groups!.account) : null,
+    toAccount: to.length === 1 ? accountIdForAlias(to[0].groups!.account) : null,
   };
 }

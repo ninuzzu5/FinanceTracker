@@ -1,4 +1,4 @@
-import { categoryLabels } from "@finance-tracker/domain";
+import { accountIds, accountLabels, categoryLabels } from "@finance-tracker/domain";
 import { categoriesFor } from "./proposals.js";
 import type { InlineKeyboard } from "./proposal-view.js";
 import type { MenuState, WizardState } from "./wizard-state.js";
@@ -21,9 +21,9 @@ export function wizardView(w: WizardState): { text: string; keyboard: InlineKeyb
     case "category": text = "Scegli la categoria:"; choices = categoriesFor(w.values.type).map((id) => [categoryLabels[id], `category.${id}`]); break;
     case "account": case "fromAccount": case "toAccount":
       text = w.step === "account" ? "Scegli il conto:" : w.step === "fromAccount" ? "Da quale conto?" : "Verso quale conto?";
-      choices = (["revolut", "isybank"] as const)
+      choices = accountIds
         .filter((id) => w.step !== "toAccount" || w.values.mode !== "transfer" || id !== w.values.fromAccount)
-        .map((id) => [id === "revolut" ? "Revolut" : "Isybank", `${w.step}.${id}`]);
+        .map((id) => [accountLabels[id], `${w.step}.${id}`]);
       break;
     case "date": text = "Quando è avvenuto il movimento?"; choices = [["Oggi", "date.today"], ["Ieri", "date.yesterday"], ["📅 Altra data", "date.custom"]]; break;
     case "customDate": text = "Scrivi la data, bro: per esempio 18/09/2026 oppure mercoledì."; break;

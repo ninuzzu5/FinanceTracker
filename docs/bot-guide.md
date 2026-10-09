@@ -5,7 +5,7 @@ Dalla root del progetto, configura privatamente `.env.local`. Se il file esiste 
 - `TELEGRAM_BOT_TOKEN`: token fornito da BotFather (obbligatorio).
 - `TELEGRAM_ALLOWED_CHAT_ID`: ID numerico positivo della tua chat privata (obbligatorio).
 - `APP_TIMEZONE`: fuso orario, predefinito `Europe/Rome`.
-- `DEFAULT_ACCOUNT`: `revolut` (predefinito) oppure `isybank`.
+- `DEFAULT_ACCOUNT`: `revolut` (predefinito), `isybank` oppure `contanti`.
 
 Il programma carica `.env.local` a runtime tramite `process.loadEnvFile`, nativo di Node.js 22+. Le variabili già presenti nell'ambiente della shell hanno precedenza. Il file è escluso da Git: non pubblicare token, ID o contenuto del file. Per il polling non servono webhook secret o hosting. Per salvare servono le quattro variabili Supabase indicate sotto; vengono validate al primo salvataggio. La validazione locale controlla formato e presenza delle impostazioni; Telegram verifica il token alla prima richiesta.
 
@@ -54,7 +54,7 @@ Il testo libero continua a funzionare senza `/start`, anche quando è visualizza
 
 **Nuovo movimento:** Spesa/Entrata → importo testuale → categoria → conto → data → anteprima standard. Le categorie sono quelle del dominio, filtrate per tipo; per le entrate sono Stipendio, Regali e Progetti personali. L'importo riusa il parser esistente (`12`, `12,50`, `12.50`); un valore non valido lascia attivo lo stesso passaggio.
 
-**Trasferimento:** importo → origine → destinazione → data → anteprima standard, senza categoria. I conti sono Revolut e Isybank. La destinazione esclude il conto di origine; anche una callback manipolata con conti uguali viene rifiutata.
+**Trasferimento:** importo → origine → destinazione → data → anteprima standard, senza categoria. I conti sono Revolut, Isybank e Contanti. La destinazione esclude il conto di origine; anche una callback manipolata con conti uguali viene rifiutata.
 
 La data offre **Oggi**, **Ieri**, **📅 Altra data**. Quest'ultima richiede una data testuale della grammatica seguente, validata in `APP_TIMEZONE`; una data non valida non viene sostituita con oggi. **⬅️ Indietro** torna al passaggio precedente conservando i valori; cambiando tipo viene azzerata una categoria incompatibile e cambiando origine viene azzerata una destinazione che diventerebbe uguale. I passaggi successivi vanno comunque riconfermati. **❌ Annulla** elimina la compilazione.
 
@@ -101,7 +101,7 @@ Senza anno si usa sempre l'anno del riferimento: `31/12` a settembre significa d
 
 Una data riconosciuta ma impossibile (`31/02/2026`) o più espressioni di data (`oggi ieri`, anche `mercoledì 16 settembre 2026`) richiedono chiarimento: **non vengono sostituite con oggi**. Le espressioni fuori grammatica non sono interpretate come date; per esempio `domani` non è supportato e rimane testo descrittivo. Se vuoi una data diversa, usa un formato della tabella.
 
-**Conto:** `revolut`, `isybank`, `isy`, `isy bank`, senza distinzione maiuscole/minuscole. Per entrate e spese un conto esplicito prevale su `DEFAULT_ACCOUNT`; in sua assenza si usa il default configurato. Se compaiono entrambi i conti senza una direzione di trasferimento, il bot chiede un solo conto. I nomi devono essere parole intere, non parti di altre parole.
+**Conto:** `revolut`, `isybank`, `isy`, `isy bank`, `contanti`, `cash`, `in contanti`, `liquidi`, senza distinzione maiuscole/minuscole. Per entrate e spese un conto esplicito prevale su `DEFAULT_ACCOUNT`; in sua assenza si usa il default configurato. Se compaiono più conti distinti senza una direzione di trasferimento, il bot chiede un solo conto. I nomi devono essere parole intere, non parti di altre parole.
 
 ### Trasferimenti tra conti personali
 
@@ -117,7 +117,7 @@ Le regole esistenti di importo e data continuano a valere. La direzione viene ri
 
 La proposta usa l'unione discriminata `TransactionDraft`: entrate/spese (o tipo ancora sconosciuto) hanno `account` e `category`; `transfer` ha esclusivamente `fromAccount` e `toAccount`, oltre a importo e data. Non contiene `account` o `category`. Il metadato di classificazione mantiene `category: null` per compatibilità con il contratto del classificatore, senza assegnare una categoria al trasferimento.
 
-L'anteprima di un trasferimento mostra importo, data, Tipo: Trasferimento, Da e A, senza riga Categoria. Il menu Modifica offre importo, data, conto di origine, conto di destinazione e tipo. Sono selezionabili soltanto Revolut e Isybank; una scelta che renderebbe i conti uguali viene rifiutata. **Scambia conti** inverte atomicamente una coppia completa: utile perché con due soli conti non è possibile invertirli uno alla volta senza renderli temporaneamente uguali.
+L'anteprima di un trasferimento mostra importo, data, Tipo: Trasferimento, Da e A, senza riga Categoria. Il menu Modifica offre importo, data, conto di origine, conto di destinazione e tipo. Sono selezionabili Revolut, Isybank e Contanti; una scelta che renderebbe i conti uguali viene rifiutata. **Scambia conti** inverte atomicamente una coppia completa: utile per invertire direttamente la direzione senza scegliere un conto intermedio.
 
 Passando da entrata/spesa a trasferimento, `account` e `category` vengono eliminati e origine/destinazione partono entrambe da confermare. Occorre sceglierle esplicitamente, diverse tra loro. Tornando a entrata/spesa, `fromAccount` e `toAccount` vengono eliminati e si devono selezionare nuovamente conto e categoria. Nessun campo incompatibile viene mantenuto. Conferma rimane bloccata finché i campi necessari non sono completi.
 
@@ -197,7 +197,7 @@ Aggiungi privatamente a `.env.local`:
 - `SUPABASE_USER_EMAIL`: email dell'utente Auth dedicato già esistente.
 - `SUPABASE_USER_PASSWORD`: password dello stesso utente.
 
-Il bot esegue `signInWithPassword` al primo salvataggio e quando la sessione manca o sta per scadere. La sessione resta in memoria sullo stesso client delle query. Prima del lookup verifica l'utente con `getUser`. I conti sono letti tramite RLS, filtrati per `user_id` e `is_active = true`, poi risolti dai nomi Revolut e Isybank. Nessun UUID è configurato nel codice. I log riportano soltanto codici applicativi, senza payload o errori grezzi dell'SDK.
+Il bot esegue `signInWithPassword` al primo salvataggio e quando la sessione manca o sta per scadere. La sessione resta in memoria sullo stesso client delle query. Prima del lookup verifica l'utente con `getUser`. I conti sono letti tramite RLS, filtrati per `user_id` e `is_active = true`, poi risolti dai nomi Revolut, Isybank e Contanti. Nessun UUID è configurato nel codice. I log riportano soltanto codici applicativi, senza payload o errori grezzi dell'SDK.
 
 Esegui personalmente questi controlli dal bot, osservando la tabella transactions in Supabase:
 
@@ -209,3 +209,30 @@ Esegui personalmente questi controlli dal bot, osservando la tabella transaction
 6. Facoltativamente, arresta il bot e configura temporaneamente una password errata solo nell'ambiente privato. Riavvia e conferma una proposta sintetica: errore leggibile, nessun falso successo e proposta ancora disponibile. Ripristina la password e riavvia prima di proseguire.
 
 In caso di risposta DB persa, verifica la tabella prima di riprovare: non è implementata idempotenza persistente. Se l'INSERT riesce ma la risposta Telegram fallisce, la riga resta salvata. Il collaudo reale non fa parte della suite automatica e non è stato eseguito dall'agente.
+
+
+## Contanti
+
+Contanti è supportato per entrate, uscite e trasferimenti. Nel testo libero gli
+alias `contanti`, `cash`, `in contanti` e `liquidi` individuano lo stesso conto.
+Due conti distinti in un movimento ordinario restano ambigui; più alias dello
+stesso conto non lo sono. Il conto predefinito resta Revolut; facoltativamente
+`DEFAULT_ACCOUNT=contanti` permette di usare Contanti quando il conto è omesso.
+
+Il wizard e Modifica offrono Contanti insieme a Revolut e Isybank. La conferma
+continua a essere necessaria per salvare. Esempi:
+
+- `12 pranzo in contanti`: uscita, Cibo, Contanti.
+- `100 stipendio cash`: entrata, Stipendio, Contanti.
+- `100 da revolut a contanti`: trasferimento verso Contanti.
+- `50 da liquidi a isybank`: trasferimento da Contanti.
+- `100 da cash a contanti`: rifiutato, perché i conti sono uguali.
+
+I trasferimenti richiedono ancora la forma esplicita `da <conto> a <conto>` e
+non vengono trattati come spese o entrate, anche se il testo contiene parole
+come spesa o stipendio. La categoria resta nulla.
+
+Prima di confermare un movimento Contanti, crea manualmente il conto come
+descritto in [supabase/README.md](../supabase/README.md#configurazione-manuale-del-conto-contanti).
+Se manca o non è attivo, il bot mostra l'errore esistente per conto non disponibile.
+Non sono implementati saldi iniziali, riconciliazione o descrizioni.

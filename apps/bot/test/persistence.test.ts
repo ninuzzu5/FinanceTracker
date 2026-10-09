@@ -11,6 +11,7 @@ const user = "00000000-0000-4000-8000-000000000001";
 const accounts: AccountRow[] = [
   { id: "00000000-0000-4000-8000-000000000002", user_id: user, name: "Revolut", is_active: true },
   { id: "00000000-0000-4000-8000-000000000003", user_id: user, name: "Isybank", is_active: true },
+  { id: "00000000-0000-4000-8000-000000000004", user_id: user, name: " Contanti ", is_active: true },
 ];
 const expense: TransactionDraft = { type: "expense", amount: 12.5, date: "2026-09-18", account: "revolut", category: "food" };
 const credentials = { url: "https://synthetic.example", anonKey: "synthetic-public-key", email: "bot@example.invalid", password: "synthetic-password" };
@@ -31,6 +32,12 @@ afterEach(() => { vi.restoreAllMocks(); sdk.createClient.mockReset(); });
 describe("Supabase transaction persistence", () => {
   it.each([
     [expense, accounts[0].id, null, "food"],
+    [{ ...expense, account: "contanti" }, accounts[2].id, null, "food"],
+    [{ ...expense, type: "income", category: "salary", account: "contanti" }, null, accounts[2].id, "salary"],
+    [{ type: "transfer", amount: 12.5, date: expense.date, fromAccount: "revolut", toAccount: "contanti" }, accounts[0].id, accounts[2].id, null],
+    [{ type: "transfer", amount: 12.5, date: expense.date, fromAccount: "contanti", toAccount: "revolut" }, accounts[2].id, accounts[0].id, null],
+    [{ type: "transfer", amount: 12.5, date: expense.date, fromAccount: "isybank", toAccount: "contanti" }, accounts[1].id, accounts[2].id, null],
+    [{ type: "transfer", amount: 12.5, date: expense.date, fromAccount: "contanti", toAccount: "isybank" }, accounts[2].id, accounts[1].id, null],
     [{ ...expense, type: "income", category: "salary", account: "isybank" }, null, accounts[1].id, "salary"],
     [{ type: "transfer", amount: 12.5, date: expense.date, fromAccount: "revolut", toAccount: "isybank" }, accounts[0].id, accounts[1].id, null],
     [{ type: "transfer", amount: 12.5, date: expense.date, fromAccount: "isybank", toAccount: "revolut" }, accounts[1].id, accounts[0].id, null],
@@ -143,6 +150,39 @@ describe("confirmation persistence boundary", () => {
       await deliverUpdate(flow, client, callback(flow, "confirm"), config, undefined, repository);
       expect(flow.store.get(123456)).toBeUndefined();
       expect(client.sendMessage.mock.calls.at(-1)?.[1]).toContain("Transazione registrata");
+    } finally { flow.store.clear(); }
+  });
+});
+
+
+describe("cash UUID persistence", () => {
+  it("fails safely for missing, inactive, foreign or duplicate Contanti accounts", async () => {
+    for (const rows of [accounts.slice(0, 2), [{ ...accounts[2], is_active: false }], [{ ...accounts[2], user_id: "foreign-user" }], [accounts[2], accounts[2]]]) {
+      const { repository, insertQuery } = setup({ rows });
+      await expect(repository.saveTransaction({ ...expense, account: "contanti" })).rejects.toMatchObject({ code: "account_missing" });
+      expect(insertQuery.insert).not.toHaveBeenCalled();
+    }
+  });
+
+  it.each([
+    ["12,50 pranzo in contanti", "expense", accounts[2].id, null, "food"],
+    ["12,50 stipendio cash", "income", null, accounts[2].id, "salary"],
+    ["12,50 da revolut a contanti stipendio", "transfer", accounts[0].id, accounts[2].id, null],
+    ["12,50 da liquidi a isybank spesa", "transfer", accounts[2].id, accounts[1].id, null],
+  ])("saves %s only after confirmation, using the resolved UUID", async (text, type, from, to, category) => {
+    const flow = new ProposalFlow();
+    const client = { call: vi.fn().mockResolvedValue(true), sendMessage: vi.fn().mockResolvedValue(undefined) };
+    const { repository, insertQuery, client: databaseClient } = setup();
+    try {
+      await deliverUpdate(flow, client, message(text), config, undefined, repository);
+      expect(client.sendMessage.mock.calls[0][1]).toContain("Contanti");
+      expect(insertQuery.insert).not.toHaveBeenCalled();
+      await deliverUpdate(flow, client, callback(flow, "confirm"), config, undefined, repository);
+      const payload = insertQuery.insert.mock.calls[0][0];
+      expect(payload).toMatchObject({ type, user_id: user, from_account_id: from, to_account_id: to, category });
+      expect(payload).not.toHaveProperty("description");
+      expect(databaseClient.from.mock.calls.map(([table]) => table)).toEqual(["accounts", "transactions"]);
+      expect(flow.store.get(123456)).toBeUndefined();
     } finally { flow.store.clear(); }
   });
 });

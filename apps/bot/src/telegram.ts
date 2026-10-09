@@ -1,9 +1,7 @@
 import { timingSafeEqual } from "node:crypto";
-import { categoryLabels, transactionTypeLabels } from "@finance-tracker/domain";
+import { accountLabels, categoryLabels, transactionTypeLabels } from "@finance-tracker/domain";
 import { processMessage, type ProcessMessageResult } from "./process-message.js";
 import { readMessageConfig, type MessageConfig } from "./config.js";
-
-const accountLabels = { revolut: "Revolut", isybank: "Isybank" } as const;
 
 export interface TelegramMessage {
   message_id: number;
@@ -93,6 +91,8 @@ export function decideUpdate(
         "• 20 benzina isybank",
         "• mercoledì barbiere 34€ isybank",
         "• 100 da revolut a isybank",
+        "• 12 pranzo in contanti",
+        "• 100 da revolut a contanti",
         "",
         `Senza data uso oggi; per entrate/uscite senza conto uso ${accountLabels[defaultAccount]}. Per i trasferimenti scrivi entrambi i conti.`,
         "Con /start o /menu scegli Nuovo movimento o Trasferimento e ti guido passo passo.",
@@ -121,7 +121,7 @@ export function decideUpdate(
         : result.reason === "invalid_or_ambiguous_date"
         ? "Bro, questa data non è valida oppure ne vedo più di una 👀\nScrivine una sola, per esempio: 10 settembre 2026 tabacco 12€"
         : result.reason === "ambiguous_account"
-          ? "Bro, qui vedo sia Revolut sia Isybank 👀\nIndicami un solo conto, per esempio: 12€ tabacco isybank"
+          ? "Bro, qui vedo più conti 👀\nIndicami un solo conto, per esempio: 12€ tabacco isybank"
           : [
             "Bro, qui manca un importo valido oppure ne vedo più di uno 👀",
             "",
