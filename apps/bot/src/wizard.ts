@@ -17,9 +17,9 @@ const advance = (w: WizardState, step: WizardStep) => { w.history.push(w.step); 
 export class GuidedEntry {
   constructor(private readonly store: ProposalStore) {}
 
-  menu(chatId: number): FlowEffect[] {
+  menu(chatId: number, sourceMessageId?: number): FlowEffect[] {
     const replaced = this.store.getState(chatId);
-    const view = menuView(this.store.openMenu(chatId));
+    const view = menuView(this.store.openMenu(chatId, sourceMessageId));
     return [{ kind: "send", chatId, ...view,
       text: replaced && replaced.kind !== "menu" ? `Ho chiuso il flusso precedente.\n\n${view.text}` : view.text }];
   }
@@ -107,7 +107,7 @@ export class GuidedEntry {
       if (!v.type || !v.account || !v.category || !categoriesFor(v.type).includes(v.category)) return show(chatId, w, "Completa tipo, conto e categoria.");
       draft = { amount: v.amount, date: v.date, type: v.type, account: v.account, category: v.category };
     }
-    const p = this.store.create(chatId, null, draft);
+    const p = this.store.create(chatId, null, draft, w.requestId);
     return [{ kind: "send", chatId, text: proposalText(p, "Ecco il movimento, bro 👌"), keyboard: proposalKeyboard(p) }];
   }
 }

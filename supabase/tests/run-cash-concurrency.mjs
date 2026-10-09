@@ -30,11 +30,13 @@ try {
     create function auth.uid() returns uuid language sql stable as $$ select nullif(current_setting('request.jwt.claim.sub',true),'')::uuid $$;
     grant usage on schema auth to anon,authenticated; grant execute on function auth.uid() to anon,authenticated;
     set financetracker.test_database='isolated';`);
-  for (const migration of ['001_initial_schema.sql','002_rls_policies.sql','004_account_openings_and_balances.sql','005_cash_reconciliation.sql']) {
+  for (const migration of ['001_initial_schema.sql','002_rls_policies.sql','004_account_openings_and_balances.sql','005_cash_reconciliation.sql','006_transaction_idempotency.sql']) {
     await admin.query(await read(`../migrations/${migration}`));
   }
   await admin.query(await read('account_balances.sql'));
   await admin.query(await read('cash_reconciliation.sql'));
+  await admin.query(await read('transaction_idempotency.sql'));
+  if (process.argv.includes('--audit')) await admin.query(await read('audit_integrity.sql'));
   await admin.query(`insert into auth.users values ('${user}');
     insert into public.accounts(id,user_id,name,type,opening_balance,opening_date) values
     ('${cash}','${user}','Contanti','cash',100,'2026-01-01'),('${bank}','${user}','Revolut','bank',100,'2026-01-01');`);
@@ -80,6 +82,14 @@ try {
   // Snapshot isolation is deliberately rejected instead of risking a stale closure check.
   await a.query('begin isolation level repeatable read');
   await assert.rejects(reconcile(a,'2026-01-04','94.00','94.00',randomUUID()), {code:'22023'}); await a.query('rollback');
+  if (process.argv.includes('--audit')) {
+    const { auditCashStress } = await import('./audit-cash-stress.mjs');
+    await auditCashStress({admin,connect,user,cash,bank});
+  }
+  if (process.argv.includes('--b1')) {
+    const {transactionConcurrency}=await import('./transaction-concurrency.mjs');
+    await transactionConcurrency({admin,connect,user,cash});
+  }
   console.log('Native PostgreSQL passed: SQL fixtures, five concurrent lock scenarios, snapshot-isolation rejection. No remote connections.');
 } finally {
   await Promise.allSettled(clients.map(c => c.end()));

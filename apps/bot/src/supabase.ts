@@ -1,7 +1,7 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import type { TransactionDraft } from "@finance-tracker/domain";
+import { accountIds, amountInCents, type TransactionDraft } from "@finance-tracker/domain";
 import { decimalCents, centsDecimal, ReconciliationError, type ReconciliationRepository, type CashPreview, type CashRequest, type CashReceipt } from "./reconciliation.js";
-import { PersistenceError, mapTransaction, type AccountRow, type TransactionRepository } from "./persistence.js";
+import { PersistenceError, mapTransaction, type TransactionRepository } from "./persistence.js";
 
 export const boundedSupabaseFetch: typeof fetch = (input, init) => {
   const timeout = AbortSignal.timeout(15_000);
@@ -23,7 +23,7 @@ export function readSupabaseConfig(env: NodeJS.ProcessEnv = process.env): Supaba
 }
 
 function queryError(stage: "accounts_query" | "insert", code?: string): PersistenceError {
-  return new PersistenceError(code === "PT423" ? "closed" : code === "42501" ? "rls" : code?.startsWith("23") ? "constraint" : stage);
+  return new PersistenceError(code === "PT409" ? "conflict" : code === "PT404" ? "account_missing" : code === "22023" ? "mapping" : code === "PGRST202" ? "configuration" : code === "PT423" ? "closed" : code === "42501" ? "rls" : code?.startsWith("23") ? "constraint" : stage);
 }
 
 export class SupabaseTransactionRepository implements TransactionRepository, ReconciliationRepository {
@@ -59,21 +59,31 @@ export class SupabaseTransactionRepository implements TransactionRepository, Rec
     return { client, userId };
   }
 
-  async saveTransaction(transaction: TransactionDraft): Promise<{ id: string }> {
-    const { client, userId } = await this.authenticate();
-    let accounts: AccountRow[];
+  async getTransactionReceipt(requestId: string): Promise<{ id: string } | null> {
+    const { client } = await this.authenticate();
     try {
-      const { data, error } = await client.from("accounts").select("id,user_id,name,is_active").eq("user_id", userId).eq("is_active", true);
-      if (error) throw queryError("accounts_query", error.code);
-      if (!Array.isArray(data) || data.some(row => typeof row.id !== "string" || typeof row.user_id !== "string" || typeof row.name !== "string")) throw new PersistenceError("accounts_query");
-      accounts = data;
-    } catch (error) { throw error instanceof PersistenceError ? error : new PersistenceError("accounts_query"); }
-    const payload = mapTransaction(transaction, userId, accounts);
-    try {
-      const { data, error } = await client.from("transactions").insert(payload).select("id").single();
+      const { data, error } = await client.rpc("get_transaction_receipt", { p_request_id: requestId });
       if (error) throw queryError("insert", error.code);
-      if (!data || typeof data.id !== "string") throw new PersistenceError("insert");
-      return { id: data.id };
+      if (!Array.isArray(data) || data.length > 1) throw new PersistenceError("insert");
+      if (data.length === 0) return null;
+      if (typeof data[0]?.transaction_id !== "string") throw new PersistenceError("insert");
+      return { id: data[0].transaction_id };
+    } catch (error) { throw error instanceof PersistenceError ? error : new PersistenceError("insert"); }
+  }
+
+  async saveTransaction(transaction: TransactionDraft, requestId: string): Promise<{ id: string }> {
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(requestId)) throw new PersistenceError("mapping");
+    const { client, userId } = await this.authenticate();
+    // Reuse domain validation with conceptual IDs. UUID resolution now occurs inside the atomic RPC.
+    const payload = mapTransaction(transaction, userId, accountIds.map(name => ({ id: name, name, user_id: userId, is_active: true })));
+    const cents = BigInt(amountInCents(payload.amount)!);
+    try {
+      const { data, error } = await client.rpc("save_transaction_once", { p_request_id: requestId,
+        p_type: payload.type, p_amount: centsDecimal(cents), p_date: payload.transaction_date,
+        p_category: payload.category, p_from_account: payload.from_account_id, p_to_account: payload.to_account_id });
+      if (error) throw queryError("insert", error.code);
+      if (!Array.isArray(data) || data.length !== 1 || typeof data[0]?.transaction_id !== "string") throw new PersistenceError("insert");
+      return { id: data[0].transaction_id };
     } catch (error) { throw error instanceof PersistenceError ? error : new PersistenceError("insert"); }
   }
 

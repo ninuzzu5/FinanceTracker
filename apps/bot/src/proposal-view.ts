@@ -1,11 +1,12 @@
+import { compactOperationKey } from "./operation-key.js";
 import { accountIds, accountLabels, categoryLabels, transactionTypeLabels } from "@finance-tracker/domain";
 import { categoriesFor, type Proposal } from "./proposals.js";
 
 export type InlineKeyboard = { inline_keyboard: { text: string; callback_data: string }[][] };
-const button = (p: Proposal, text: string, action: string) => ({ text, callback_data: `p:${p.id}:${p.revision}:${action}` });
+const button = (p: Proposal, text: string, action: string) => ({ text, callback_data: `p:${p.id}:${p.revision}:${action}${action === "confirm" ? `:${compactOperationKey(p.requestId)}` : ""}` });
 
 export function proposalKeyboard(p: Proposal): InlineKeyboard {
-  return { inline_keyboard: [[button(p, "✅ Conferma", "confirm"), button(p, "✏️ Modifica", "edit"), button(p, "❌ Annulla", "cancel")]] };
+  return { inline_keyboard: [[button(p, p.submitted ? "🔄 Riprova stessa operazione" : "✅ Conferma", "confirm"), ...(p.submitted ? [] : [button(p, "✏️ Modifica", "edit")]), button(p, "❌ Annulla", "cancel")]] };
 }
 
 export function backKeyboard(p: Proposal): InlineKeyboard {
@@ -44,6 +45,6 @@ export function proposalText(p: Proposal, title = "Anteprima aggiornata, bro �
     `📅 ${p.date.split("-").reverse().join("/")}`,
     `↔️ Tipo: ${p.type ? transactionTypeLabels[p.type] : "da confermare"}`,
     ...(p.type === "transfer" ? [] : [`🏷️ Categoria: ${p.category ? categoryLabels[p.category] : "da confermare"}`]),
-    "", "Solo anteprima: non ho salvato nulla.",
+    "", p.submitted ? "Esito da verificare: il movimento potrebbe essere già salvato. Conferma ritenta la stessa operazione." : "Solo anteprima: Conferma salva o recupera la ricevuta della stessa operazione.",
   ].join("\n");
 }

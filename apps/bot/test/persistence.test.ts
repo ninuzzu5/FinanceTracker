@@ -7,6 +7,7 @@ import type { TransactionDraft } from "@finance-tracker/domain";
 
 const sdk = vi.hoisted(() => ({ createClient: vi.fn() }));
 vi.mock("@supabase/supabase-js", () => ({ createClient: sdk.createClient }));
+const requestId = "40000000-0000-4000-8000-000000000001";
 const user = "00000000-0000-4000-8000-000000000001";
 const accounts: AccountRow[] = [
   { id: "00000000-0000-4000-8000-000000000002", user_id: user, name: "Revolut", is_active: true },
@@ -23,7 +24,23 @@ function setup(options: { loginError?: boolean; sessionInvalid?: boolean; accoun
     getSession: vi.fn().mockResolvedValue({ data: { session: null }, error: null }),
     signInWithPassword: vi.fn().mockResolvedValue({ data: { session: options.sessionInvalid ? null : session }, error: options.loginError ? new Error("private credentials") : null }),
     getUser: vi.fn().mockResolvedValue({ data: { user: { id: user } }, error: null }),
-  }, from: vi.fn((table: string) => table === "accounts" ? accountsQuery : insertQuery) };
+  }, from: vi.fn((table: string) => table === "accounts" ? accountsQuery : insertQuery),
+    rpc: vi.fn(async (name: string, args: Record<string, unknown>) => {
+      if (name === "get_transaction_receipt") return { data: [], error: null };
+      if (options.accountsError) return { data: null, error: { code: options.accountsError } };
+      const resolve = (alias: unknown) => {
+        if (alias === null) return null;
+        const matches = (options.rows ?? accounts).filter(a => a.user_id === user && a.is_active && a.name.trim().toLowerCase() === alias);
+        return matches.length === 1 ? matches[0].id : undefined;
+      };
+      const from = resolve(args.p_from_account), to = resolve(args.p_to_account);
+      if (from === undefined || to === undefined) return { data: null, error: { code: "PT404" } };
+      insertQuery.insert({ user_id: user, type: args.p_type, amount: Number(args.p_amount), transaction_date: args.p_date,
+        category: args.p_category, from_account_id: from, to_account_id: to });
+      const result = await insertQuery.single();
+      return { data: [{ transaction_id: result.data.id }], error: result.error };
+    }),
+  };
   sdk.createClient.mockReturnValue(client);
   return { repository: new SupabaseTransactionRepository(() => credentials), client, accountsQuery, insertQuery };
 }
@@ -43,30 +60,30 @@ describe("Supabase transaction persistence", () => {
     [{ type: "transfer", amount: 12.5, date: expense.date, fromAccount: "isybank", toAccount: "revolut" }, accounts[1].id, accounts[0].id, null],
   ] as const)("maps and inserts %s using authenticated ownership", async (transaction, from, to, category) => {
     const { repository, client, accountsQuery, insertQuery } = setup();
-    await expect(repository.saveTransaction(transaction as TransactionDraft)).resolves.toEqual({ id: "synthetic-transaction" });
+    await expect(repository.saveTransaction(transaction as TransactionDraft, requestId)).resolves.toEqual({ id: "synthetic-transaction" });
     expect(client.auth.signInWithPassword).toHaveBeenCalledWith({ email: credentials.email, password: credentials.password });
-    expect(accountsQuery.eq).toHaveBeenCalledWith("user_id", user);
-    expect(accountsQuery.eq).toHaveBeenCalledWith("is_active", true);
+    expect(client.from).not.toHaveBeenCalled();
+    expect(client.rpc).toHaveBeenCalledWith("save_transaction_once", expect.objectContaining({ p_request_id: requestId, p_amount: "12.50", p_type: transaction.type }));
     expect(insertQuery.insert).toHaveBeenCalledWith({ user_id: user, type: transaction.type, amount: 12.5, transaction_date: expense.date, category, from_account_id: from, to_account_id: to });
     expect(sdk.createClient).toHaveBeenCalledWith(credentials.url, credentials.anonKey, { auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false }, global: { fetch: expect.any(Function) } });
   });
   it.each([
     [{ loginError: true }, "authentication"], [{ sessionInvalid: true }, "session"],
-    [{ accountsError: "XX000" }, "accounts_query"], [{ rows: [] }, "account_missing"],
+    [{ accountsError: "XX000" }, "insert"], [{ rows: [] }, "account_missing"],
     [{ insertError: "XX000" }, "insert"], [{ insertError: "23514" }, "constraint"], [{ insertError: "42501" }, "rls"], [{ insertError: "PT423" }, "closed"],
   ] as const)("propagates safe error %s", async (options, code) => {
     const { repository, insertQuery } = setup(options);
-    await expect(repository.saveTransaction(expense)).rejects.toMatchObject({ code, message: `Transaction persistence failed: ${code}` });
+    await expect(repository.saveTransaction(expense, requestId)).rejects.toMatchObject({ code, message: `Transaction persistence failed: ${code}` });
     if (!["insert", "constraint", "rls", "closed"].includes(code)) expect(insertQuery.insert).not.toHaveBeenCalled();
   });
   it("reuses valid session and verifies the user before queries", async () => {
     const { repository, client } = setup();
     client.auth.getSession.mockResolvedValue({ data: { session }, error: null } as never);
-    await repository.saveTransaction(expense);
+    await repository.saveTransaction(expense, requestId);
     expect(client.auth.signInWithPassword).not.toHaveBeenCalled();
     client.auth.getUser.mockResolvedValue({ data: { user: { id: "another-synthetic-user" } }, error: null });
     client.from.mockClear();
-    await expect(repository.saveTransaction(expense)).rejects.toMatchObject({ code: "session" });
+    await expect(repository.saveTransaction(expense, requestId)).rejects.toMatchObject({ code: "session" });
     expect(client.from).not.toHaveBeenCalled();
   });
   it("rejects missing configuration and privileged keys", () => {
@@ -97,7 +114,7 @@ describe("confirmation persistence boundary", () => {
     const flow = new ProposalFlow();
     const client = { call: vi.fn().mockResolvedValue(true), sendMessage: vi.fn().mockResolvedValue(undefined) };
     let finish!: (result: { id: string }) => void;
-    const repository = { saveTransaction: vi.fn(() => new Promise<{ id: string }>(resolve => { finish = resolve; })) };
+    const repository = { getTransactionReceipt: vi.fn().mockResolvedValue(null), saveTransaction: vi.fn(() => new Promise<{ id: string }>(resolve => { finish = resolve; })) };
     const deliver = (update: unknown) => deliverUpdate(flow, client, update, config, undefined, repository);
     try {
       await deliver(message("12,50 tabacco"));
@@ -124,7 +141,7 @@ describe("confirmation persistence boundary", () => {
   it("keeps a successful insert closed even if Telegram success delivery fails", async () => {
     const flow = new ProposalFlow();
     const client = { call: vi.fn().mockResolvedValue(true), sendMessage: vi.fn().mockResolvedValue(undefined) };
-    const repository = { saveTransaction: vi.fn().mockResolvedValue({ id: "synthetic-transaction" }) };
+    const repository = { getTransactionReceipt: vi.fn().mockResolvedValue(null), saveTransaction: vi.fn().mockResolvedValue({ id: "synthetic-transaction" }) };
     try {
       await deliverUpdate(flow, client, message("12 tabacco"), config, undefined, repository);
       const confirm = callback(flow, "confirm");
@@ -138,7 +155,7 @@ describe("confirmation persistence boundary", () => {
   it.each(["authentication", "account_missing", "insert", "constraint", "rls"] as const)("retains proposal without false success after %s", async code => {
     const flow = new ProposalFlow();
     const client = { call: vi.fn().mockResolvedValue(true), sendMessage: vi.fn().mockResolvedValue(undefined) };
-    const repository = { saveTransaction: vi.fn().mockRejectedValue(new PersistenceError(code)) };
+    const repository = { getTransactionReceipt: vi.fn().mockResolvedValue(null), saveTransaction: vi.fn().mockRejectedValue(new PersistenceError(code)) };
     const log = vi.spyOn(console, "error").mockImplementation(() => {});
     try {
       await deliverUpdate(flow, client, message("12 tabacco"), config, undefined, repository);
@@ -159,7 +176,7 @@ describe("cash UUID persistence", () => {
   it("fails safely for missing, inactive, foreign or duplicate Contanti accounts", async () => {
     for (const rows of [accounts.slice(0, 2), [{ ...accounts[2], is_active: false }], [{ ...accounts[2], user_id: "foreign-user" }], [accounts[2], accounts[2]]]) {
       const { repository, insertQuery } = setup({ rows });
-      await expect(repository.saveTransaction({ ...expense, account: "contanti" })).rejects.toMatchObject({ code: "account_missing" });
+      await expect(repository.saveTransaction({ ...expense, account: "contanti" }, requestId)).rejects.toMatchObject({ code: "account_missing" });
       expect(insertQuery.insert).not.toHaveBeenCalled();
     }
   });
@@ -181,7 +198,8 @@ describe("cash UUID persistence", () => {
       const payload = insertQuery.insert.mock.calls[0][0];
       expect(payload).toMatchObject({ type, user_id: user, from_account_id: from, to_account_id: to, category });
       expect(payload).not.toHaveProperty("description");
-      expect(databaseClient.from.mock.calls.map(([table]) => table)).toEqual(["accounts", "transactions"]);
+      expect(databaseClient.from).not.toHaveBeenCalled();
+      expect(databaseClient.rpc).toHaveBeenCalledWith("save_transaction_once", expect.objectContaining({ p_request_id: expect.any(String) }));
       expect(flow.store.get(123456)).toBeUndefined();
     } finally { flow.store.clear(); }
   });

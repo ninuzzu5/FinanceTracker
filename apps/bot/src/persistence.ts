@@ -1,6 +1,6 @@
 import { accountIds, amountInCents, expenseCategoryIds, incomeCategoryIds, type AccountId, type TransactionDraft } from "@finance-tracker/domain";
 
-export type PersistenceErrorCode = "closed" | "configuration" | "authentication" | "session" | "accounts_query" | "account_missing" | "mapping" | "insert" | "constraint" | "rls";
+export type PersistenceErrorCode = "conflict" | "closed" | "configuration" | "authentication" | "session" | "accounts_query" | "account_missing" | "mapping" | "insert" | "constraint" | "rls";
 export class PersistenceError extends Error {
   constructor(readonly code: PersistenceErrorCode) { super(`Transaction persistence failed: ${code}`); }
 }
@@ -15,7 +15,8 @@ export interface TransactionPayload {
   to_account_id: string | null;
 }
 export interface TransactionRepository {
-  saveTransaction(transaction: TransactionDraft): Promise<{ id: string }>;
+  saveTransaction(transaction: TransactionDraft, requestId: string): Promise<{ id: string }>;
+  getTransactionReceipt(requestId: string): Promise<{ id: string } | null>;
 }
 
 export function mapTransaction(transaction: TransactionDraft, userId: string, accounts: AccountRow[]): TransactionPayload {
@@ -45,10 +46,11 @@ export function mapTransaction(transaction: TransactionDraft, userId: string, ac
 
 export function persistenceMessage(error: unknown): string {
   const code = error instanceof PersistenceError ? error.code : "insert";
+  if (code === "conflict") return "Questa operazione è già stata registrata con valori diversi. Non ho creato un nuovo movimento; recupera la ricevuta dal vecchio pulsante Conferma.";
   if (code === "closed") return "La giornata Contanti è già riconciliata. Il movimento richiede una riapertura, non ancora disponibile.";
   if (code === "account_missing") return "Bro, il conto richiesto non è disponibile nel database. Controlla i conti prima di riprovare.";
   if (code === "configuration" || code === "authentication" || code === "session") return "Bro, non riesco ad accedere al database. Controlla la configurazione del bot prima di riprovare.";
   if (code === "mapping" || code === "constraint") return "Bro, il database non accetta questi dati. Controlla la proposta prima di riprovare.";
   if (code === "rls") return "Bro, il database non autorizza il salvataggio. Controlla i permessi prima di riprovare.";
-  return "Bro, non ho ricevuto conferma del salvataggio. Verifica il database prima di riprovare per evitare duplicati.";
+  return "Esito del salvataggio incerto. Riprova Conferma: mantiene la stessa chiave e recupera una ricevuta già salvata. Annulla chiude solo il flusso.";
 }

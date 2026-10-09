@@ -11,6 +11,15 @@ export async function deliverUpdate(
 ): Promise<void> {
   const effects = flow.handle(update, config);
   for (const effect of effects) {
+    if (effect.kind === "recoverMovement") {
+      try {
+        const receipt = await repository.getTransactionReceipt(effect.requestId);
+        await client.sendMessage(effect.chatId, receipt
+          ? "✅ Operazione già registrata nel database. Ricevuta recuperata; nessun nuovo movimento creato."
+          : "Nessuna ricevuta disponibile: il salvataggio può essere ancora in corso o la proposta è scaduta. Riprova questo pulsante; questa verifica non inserisce movimenti.", signal);
+      } catch { await client.sendMessage(effect.chatId, "Non riesco a verificare la ricevuta. Riprova lo stesso pulsante; questa verifica non inserisce movimenti.", signal); }
+      continue;
+    }
     if (effect.kind === "loadCash" || effect.kind === "reconcileCash") {
       try {
         if (effect.kind === "loadCash") effects.push(...flow.completeCashLoad(effect, await reconciliation.previewCash(effect.date)));
@@ -23,7 +32,7 @@ export async function deliverUpdate(
     }
     if (effect.kind === "persist") {
       let failure: unknown;
-      try { await repository.saveTransaction(effect.proposal); }
+      try { await repository.saveTransaction(effect.proposal, effect.proposal.requestId); }
       catch (error) { failure = error ?? new Error("Persistence failed"); }
       effects.push(...flow.completeSave(effect, failure));
       continue;

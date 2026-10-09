@@ -273,3 +273,31 @@ Test manuali **nel progetto di test**, dopo l'allineamento del database:
 
 Non usare questi esempi per inserire denaro inventato nei conti personali; gli
 importi sono input di prova da adattare nell'ambiente isolato.
+
+## Retry sicuri dei movimenti (migrazione 006, B1)
+
+La conferma ora salva tramite RPC atomica con una chiave legata alla fonte.
+Dopo un timeout usa **Riprova stessa operazione**: non cambiare i valori e non
+copiare il messaggio in uno nuovo. Anche dopo un riavvio il vecchio pulsante può
+verificare una ricevuta già salvata senza inserire un altro movimento. Annulla
+chiude soltanto la conversazione e non elimina eventuali scritture riuscite.
+
+Una nuova fonte identifica una nuova operazione: due messaggi identici possono
+registrare due spese legittime. Nel guidato vale il comando /menu o /start iniziale.
+Modificare una fonte già contabilizzata può produrre un'anteprima, ma la conferma
+con valori differenti viene rifiutata e la ricevuta viene verificata; non corregge
+né duplica il movimento originale. La gestione completa B6 resta separata.
+
+Dopo aver applicato 006 in un ambiente di test:
+
+1. Invia `0,29 tabacco revolut`, conferma due volte: una transazione e una ricevuta.
+2. Modifica **quel messaggio** in `0,30 tabacco revolut`: la conferma deve segnalare
+   conflitto e il numero di transazioni restare invariato.
+3. Invia **due messaggi distinti** `0,29 tabacco revolut`, conferma entrambi: due
+   ulteriori operazioni con chiavi diverse, entrambe valide.
+4. Per timeout, replay e riavvio usa i test automatici isolati. Il pulsante di una
+   proposta scaduta senza ricevuta deve effettuare solo una lettura.
+
+La migrazione non deduplica lo storico o le operazioni della vecchia versione:
+prima dell'aggiornamento controlla i vecchi esiti incerti. Non provare questi
+messaggi nei conti personali reali.

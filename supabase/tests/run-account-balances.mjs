@@ -49,6 +49,15 @@ try {
   await db.exec(cashFixture);
   assert.equal((await db.query("select count(*)::int as n from public.account_adjustments")).rows[0].n, 0);
   console.log(`Cash SQL passed: ${(cashFixture.match(/select pg_temp\.(check_true|expect_error)/g) ?? []).length} assertions; fixtures rolled back.`);
+  await db.exec(await read("../migrations/006_transaction_idempotency.sql"));
+  assert.deepEqual((await db.query("select * from public.transactions")).rows, before);
+  assert.equal((await db.query("select count(*)::int n from public.transaction_receipts")).rows[0].n, 0);
+  const receipts = await read("transaction_idempotency.sql");
+  await db.exec(receipts);
+  console.log(`B1 SQL passed: ${(receipts.match(/select pg_temp\.(check_receipt|receipt_error)/g) ?? []).length} assertions; history unchanged; fixtures rolled back.`);
+  const audit = await read("audit_integrity.sql");
+  await db.exec(audit);
+  console.log(`Audit SQL: ${(audit.match(/select pg_temp\.audit_(check|error)/g) ?? []).length} assertions passed, including confirmed integrity gaps (not fixed).`);
   const checks = (fixture.match(/select pg_temp\.(assert_balance|expect_error)/g) ?? []).length;
   console.log(`SQL integration passed: ${checks} balance/error assertions, RLS and migration preservation checks. Fixtures rolled back.`);
 } finally {

@@ -368,3 +368,150 @@ per quell'ambiente. Gli importi delle fixture non sono suggerimenti per i tuoi c
 Dopo conferma controlla che sia comparsa **una riga account_adjustments** e nessuna
 nuova riga transactions, e leggi get_account_balances con la sessione autenticata
 reale dell'utente di test. Non simulare claim nel progetto personale.
+
+## B1: ricevute persistenti dei movimenti — migrazione 006
+
+`migrations/006_transaction_idempotency.sql` richiede 005. Crea soltanto
+`transaction_receipts`, policy/trigger di protezione e due RPC. Non modifica,
+riclassifica o assegna chiavi alle transazioni storiche. Il runner verifica che
+anche una riga storica con precisione non compatibile rimanga identica.
+
+### Applicazione manuale esatta
+
+1. Ferma il bot e verifica/risolvi privatamente gli esiti incerti della vecchia
+   versione prima di distribuirne una nuova. I vecchi salvataggi non hanno ricevute:
+   la migrazione non può deduplicarli retroattivamente.
+2. Nel progetto corretto, **SQL Editor**, esegui solo questo preflight di metadati:
+
+   ```sql
+   select to_regclass('public.transaction_receipts') as existing_receipts;
+   select to_regprocedure('public.reconcile_cash(uuid,date,numeric,numeric,uuid)') as migration_005;
+   select relname, relrowsecurity from pg_class
+   where oid in ('public.accounts'::regclass,'public.transactions'::regclass);
+   select conname, pg_get_constraintdef(oid) from pg_constraint
+   where conrelid in ('public.accounts'::regclass,'public.transactions'::regclass);
+   select tablename, policyname, roles, cmd, qual, with_check from pg_policies
+   where schemaname='public' and tablename in ('accounts','transactions');
+   select proname, pg_get_function_identity_arguments(oid) from pg_proc
+   where pronamespace='public'::regnamespace
+     and proname in ('save_transaction_once','get_transaction_receipt','guard_transaction_receipts');
+   ```
+
+3. Verifica che 005 sia installata, RLS attiva, ownership e vincoli coerenti con
+   001/002/005 e che gli oggetti 006 siano assenti. Il catalogo remoto non è stato
+   verificato da questa task. Se è diverso, fermati e confrontalo; non cancellare
+   oggetti e non rilanciare le migrazioni baseline.
+4. Prova prima in un progetto Supabase di test separato. Poi, con un amministratore
+   fidato, incolla ed esegui **l'intero file 006**, BEGIN/COMMIT inclusi, una sola
+   volta. La migrazione è transazionale. In caso di errore esegui ROLLBACK nella
+   sessione prima di riprovare. Il nuovo FK richiede normali lock DDL sulla tabella
+   transazioni; scegli una finestra senza scritture.
+5. Verifica tabella/RLS/policy e funzioni. Se PostgREST non trova subito le RPC,
+   attendi il refresh o esegui `NOTIFY pgrst, 'reload schema';`. Esegui build e
+   riavvia il bot aggiornato. Nessun nuovo valore è richiesto in `.env.local`.
+
+Non usare claim simulati o fixture nel progetto personale. Le chiamate reali
+avvengono con la sessione Supabase autenticata del bot; auth.uid() deve essere
+presente. L'RPC nel SQL Editor amministrativo senza JWT è intenzionalmente rifiutata.
+
+### Identità e atomicità
+
+Per il testo libero la chiave UUIDv8 deriva da SHA-256 di un namespace versionato,
+chat e message_id. Per il guidato deriva dal messaggio `/menu` o `/start` che avvia
+il flusso e viene mantenuta fino alla proposta finale. Edizioni della stessa fonte,
+replay, ricostruzione dopo riavvio e retry mantengono la chiave. Un nuovo messaggio
+(o un nuovo comando menu) identifica invece una nuova operazione, anche con valori
+identici. Il database conserva solo la chiave opaca, non testo o identificatori
+Telegram grezzi. Contratto attuale: **un bot Telegram per proprietario Supabase**;
+non cambiare il namespace o riutilizzare lo stesso proprietario per bot diversi
+senza progettare prima un namespace distinto e una transizione compatibile.
+
+`save_transaction_once(p_request_id,p_type,p_amount,p_date,p_category,
+p_from_account,p_to_account)` riceve alias concettuali dei conti, senza user_id
+esterno. Il client riutilizza la validazione di dominio; la RPC risolve gli UUID
+all'interno della scrittura. SECURITY DEFINER con search_path vuoto e filtri
+espliciti di proprietà permette di scrivere nella tabella ricevute riservata.
+La funzione deve restare sotto un proprietario amministrativo fidato.
+
+Un lock advisory transazionale su utente/chiave serializza i tentativi della stessa
+operazione, in READ COMMITTED. Una collisione dell'hash del lock può solo rallentare
+richieste estranee; l'unicità usa la coppia completa user_id/request_id. Il payload
+canonico comprende tipo, importo numeric, data, categoria e alias di origine/
+destinazione. La stessa chiave con payload diverso è rifiutata con PT409.
+
+Se esiste la ricevuta coerente, la RPC restituisce l'UUID originale **prima** della
+risoluzione dei conti e dei controlli di chiusura: recuperare una scrittura riuscita
+resta possibile con conto disattivato/rinominato o giornata Contanti poi chiusa.
+Altrimenti inserisce transazione e ricevuta nella stessa transazione SQL. Vincoli
+esistenti, FK di proprietà e trigger Contanti rimangono attivi. Un errore/rollback
+non lascia una ricevuta né una nuova transazione parziale.
+
+`transaction_receipts` conserva proprietario, request_id, transaction_id, payload
+originale e data di creazione. RLS autorizza solo la lettura del proprietario;
+INSERT/UPDATE/DELETE diretti sono revocati ad authenticated. Le ricevute sono
+immutabili, e il FK impedisce di cancellare una transazione referenziata: la chiave
+non può diventare riutilizzabile per ricreare un movimento. Questa restrizione
+riguarda solo i movimenti creati dal nuovo percorso RPC; una futura cancellazione
+avrà bisogno di un modello esplicito che preservi la ricevuta. Il payload è quello
+dell'operazione originaria, non un saldo memorizzato o un motore di aggiornamento
+retroattivo dei movimenti.
+
+`get_transaction_receipt(p_request_id)` è SECURITY INVOKER, soggetta a RLS e filtro
+esplicito auth.uid(). Restituisce zero righe oppure l'UUID già registrato. Le nuove
+RPC non sono eseguibili da PUBLIC/anon; authenticated senza JWT è rifiutato.
+
+### Telegram e limiti dichiarati
+
+Il pulsante Conferma include la chiave compatta, entro il limite Telegram di 64
+byte. Dopo un timeout i valori della proposta restano congelati e il retry usa
+la stessa chiave. Una conferma scaduta, obsoleta o ricevuta dopo riavvio può soltanto
+**leggere una ricevuta**: non ricostruisce il payload e non inserisce nulla. Se la
+prima richiesta non ha ancora concluso il commit, il controllo può non trovare
+ancora una ricevuta: ripremi lo stesso pulsante dopo un intervallo.
+
+Il replay del messaggio crea una nuova anteprima con la medesima identità. Se il
+payload corrisponde, la conferma recupera la ricevuta; se differisce (anche perché
+una data relativa è stata reinterpretata un altro giorno), non crea una seconda
+transazione e segnala conflitto. In questo caso il bot tenta anche la lettura della
+ricevuta. Una modifica della fonte già contabilizzata non corregge il movimento
+esistente e non può crearne un secondo con la stessa chiave. Non è implementata
+l'intera UX B6 per ignorare preventivamente tutte le fonti già contabilizzate.
+
+Fuori copertura:
+
+- Transazioni create prima di 006, senza ricevuta associata; inclusi vecchi pulsanti
+  che non contengono la chiave. Non modificare/reinviare vecchie fonti per correggere
+  lo storico: B6 completo e recupero dello storico restano attività separate.
+- Inserimenti diretti SQL/REST su transactions che non passano dalla nuova RPC;
+  restano disponibili secondo le policy preesistenti. Nessun altro bug dell'audit
+  viene risolto attraverso questa task.
+- Un messaggio nuovo, copia/incolla o inoltro con message_id diverso è una nuova
+  operazione: non è possibile distinguerlo automaticamente da una seconda spesa
+  legittima identica. In caso di esito incerto usa il vecchio pulsante, non una copia.
+- Una compilazione guidata non ancora salvata persa al riavvio non è ricostruibile
+  dal solo pulsante. Il pulsante può recuperare eventuale ricevuta, non salvare un
+  payload mancante. Riprendere automaticamente bozze richiederebbe persistenza
+  della conversazione, esclusa da B1.
+- Modifiche manuali di record fuori RPC, rimozione amministrativa delle protezioni,
+  cambio del namespace o altri bot con lo stesso proprietario non fanno parte
+  della garanzia di retry dell'attuale bot.
+
+### Verifiche e ripetibilità
+
+```sh
+npm test
+npm run typecheck
+npm run build
+node supabase/tests/run-account-balances.mjs /private/tmp/financetracker-sql-runtime/node_modules/@electric-sql/pglite/dist/index.js
+node supabase/tests/run-cash-concurrency.mjs /private/tmp/financetracker-concurrency-runtime/node_modules/embedded-postgres/dist/index.js --b1 --audit
+```
+
+I runtime temporanei e i limiti dell'Auth locale sono descritti sopra. Il runner
+SQL verifica 006, conservazione dello storico, replay, campi modificati, identità
+distinte, RLS, account inattivi, giornate chiuse e rollback. Quello nativo usa
+sessioni separate per 25 retry simultanei, payload concorrenti incompatibili,
+25 operazioni legittime identiche, disconnessione dopo commit e gare con la
+riconciliazione. Include anche il repository e il flusso bot effettivi collegati
+al PostgreSQL locale tramite un SDK sintetico: perdita della risposta post-commit,
+doppia conferma, reset dello stato di processo, replay e modifica della fonte.
+Nessuna connessione remota e nessun uso di credenziali reali.

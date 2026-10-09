@@ -5,11 +5,13 @@ import { ProposalStore, categoriesFor, type Proposal } from "./proposals.js";
 import { backKeyboard, choicesKeyboard, fieldKeyboard, proposalKeyboard, proposalText, type InlineKeyboard } from "./proposal-view.js";
 import { PersistenceError, persistenceMessage } from "./persistence.js";
 import { cashInput, reconciliationView, reconciliationMessage, ReconciliationError, type CashPreview, type CashReceipt, type CashRequest } from "./reconciliation.js";
+import { expandOperationKey } from "./operation-key.js";
 import { GuidedEntry } from "./wizard.js";
 
 export type FlowEffect =
   | { kind: "send"; chatId: number; text: string; keyboard?: InlineKeyboard }
   | { kind: "answer"; queryId: string; text: string }
+  | { kind: "recoverMovement"; chatId: number; requestId: string }
   | { kind: "persist"; chatId: number; messageId: number; proposal: Proposal }
   | { kind: "loadCash"; chatId: number; stateId: string; date: string }
   | { kind: "reconcileCash"; chatId: number; messageId: number; stateId: string; request: CashRequest }
@@ -31,12 +33,17 @@ export class ProposalFlow {
     if (decision.kind === "ignore") return [];
     if (this.saving.has(decision.chatId)) return [send(decision.chatId, "Salvataggio in corso, bro. Aspetta la conferma.")];
     const message = (update.message ?? update.edited_message) as { message_id: number; text: string };
+    const pendingProposal = this.store.get(decision.chatId);
+    if (pendingProposal?.submitted && "edited_message" in update && pendingProposal.sourceMessageId === message.message_id)
+      return [send(decision.chatId, "Il salvataggio è già stato tentato. Usa Conferma per recuperare la stessa operazione; non modificare la fonte finché l’esito è incerto.")];
     const command = /^\/(start|menu|cancel|riconcilia)(?:@niuzzu_bot)?(?:\s|$)/i.exec(message.text.trim());
     if (command) {
       if (command[1].toLowerCase() === "riconcilia") return [send(decision.chatId, ...this.cashViewArgs(decision.chatId, true))];
-      if (command[1].toLowerCase() !== "cancel") return this.guided.menu(decision.chatId);
+      if (command[1].toLowerCase() !== "cancel") return this.guided.menu(decision.chatId, message.message_id);
+      const wasUncertainMovement = this.store.get(decision.chatId)?.submitted;
       const wasUncertain = this.store.getState(decision.chatId)?.kind === "reconciliation" && (this.store.getState(decision.chatId) as { step?: string }).step === "uncertain";
       this.store.remove(decision.chatId);
+      if (wasUncertainMovement) return [send(decision.chatId, "Flusso chiuso: non ho annullato eventuali movimenti già salvati. Il vecchio pulsante Conferma può recuperare la ricevuta.")];
       if (wasUncertain) return [send(decision.chatId, "Flusso chiuso. L'esito resta incerto: non ho annullato eventuali rettifiche nel database.")];
       return [send(decision.chatId, "❌ Flusso annullato, bro. Scrivimi un movimento oppure usa /menu.")];
     }
@@ -123,6 +130,12 @@ export class ProposalFlow {
       // Log only an application code, never SDK errors or financial payloads.
       console.error("Transaction persistence failed", error instanceof PersistenceError ? error.code : "unexpected");
       const current = this.store.get(effect.chatId);
+      if (error instanceof PersistenceError && error.code === "conflict") {
+        this.store.remove(effect.chatId);
+        return [send(effect.chatId, persistenceMessage(error)), { kind: "recoverMovement", chatId: effect.chatId, requestId: effect.proposal.requestId }];
+      }
+      if (current && (!(error instanceof PersistenceError) || error.code === "insert")) current.uncertainOutcome = true;
+      if (current && error instanceof PersistenceError && error.code !== "insert" && !current.uncertainOutcome) current.submitted = false;
       return [send(effect.chatId, persistenceMessage(error)), ...(current ? [preview(effect.chatId, current)] : [])];
     }
     this.store.remove(effect.chatId);
@@ -168,9 +181,20 @@ export class ProposalFlow {
     }
     if (query.data.startsWith("m:") || query.data.startsWith("w:")) return this.guided.callback(chatId, query.id, query.data, config, now);
     const answer = (text: string): FlowEffect[] => [{ kind: "answer", queryId: query.id as string, text }];
-    const match = /^p:([a-f0-9]{16}):(\d+):([a-zA-Z_.]+)$/.exec(query.data);
+    const match = /^p:([a-f0-9]{16}):(\d+):([a-zA-Z_.]+)(?::([A-Za-z0-9_-]{22}))?$/.exec(query.data);
     let p = this.store.get(chatId);
-    if (!match || !p || match[1] !== p.id || Number(match[2]) !== p.revision) return answer(stale);
+    if (!match) return answer(stale);
+    const recoveryKey = match[4] ? expandOperationKey(match[4]) : null;
+    if (match[4] && (!recoveryKey || match[3] !== "confirm")) return answer(stale);
+    if (!p || match[1] !== p.id || Number(match[2]) !== p.revision) {
+      // A stale key can only READ its owner's receipt. It never creates or replays a write.
+      return recoveryKey && match[3] === "confirm"
+        ? [...answer("Verifico la ricevuta."), { kind: "recoverMovement", chatId, requestId: recoveryKey }]
+        : answer(stale);
+    }
+    if (recoveryKey && recoveryKey !== p.requestId) return answer(stale);
+    if (p.submitted && !["confirm", "cancel"].includes(match[3]))
+      return answer("Esito incerto: ritenta Conferma con gli stessi valori, oppure chiudi il flusso.");
     const action = match[3];
     if (action === "confirm" || action === "cancel") {
       if (action === "confirm" && p.type === "transfer" && (!p.fromAccount || !p.toAccount || p.fromAccount === p.toAccount)) {
@@ -180,6 +204,7 @@ export class ProposalFlow {
         return [...answer("Scegli prima conto, tipo e categoria da Modifica."), preview(chatId, p)];
       }
       if (action === "confirm") {
+        p.submitted = true; p.editing = null;
         this.saving.add(chatId);
         return [{ kind: "answer", queryId: query.id, text: "Salvataggio in corso." },
           { kind: "persist", chatId, messageId: query.message.message_id as number, proposal: { ...p } }];
@@ -188,7 +213,7 @@ export class ProposalFlow {
       return [
         ...answer("Annullata."),
         { kind: "clearButtons", chatId, messageId: query.message.message_id as number },
-        send(chatId, "❌ Proposta annullata, bro."),
+        send(chatId, p.submitted ? "Flusso chiuso; eventuali movimenti già salvati non sono annullati. Il vecchio pulsante Conferma può recuperare la ricevuta." : "❌ Proposta annullata, bro."),
       ];
     }
     if (action === "swap") {
