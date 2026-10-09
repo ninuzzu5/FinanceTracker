@@ -67,7 +67,7 @@ describe("guided entry and menu", () => {
 
   it("keeps invalid amounts and dates at the same step", () => {
     start(); click("type.expense");
-    for (const value of ["zero", "-12", "12 pizza"]) {
+    for (const value of ["zero", "-12", "12 pizza", "-€12", "−€12", "- EUR 12", "–12", "€ − 12", "－ € 12"]) {
       expect(sent(text(value))[0].text).toContain("Importo non valido");
       expect(flow.store.getState(chatId)).toMatchObject({ step: "amount", values: { amount: null } });
     }
@@ -190,5 +190,19 @@ describe("cash guided entry", () => {
     expect(sent(preview)[0].text).not.toContain("Categoria:");
     click("confirm");
     expect(flow.store.get(chatId)).toBeUndefined();
+  });
+});
+
+describe("B4 — guided income and transfers", () => {
+  it.each(["income", "transfer"])("rejects signed amounts in the %s wizard without advancing", mode => {
+    if (mode === "transfer") start("transfer");
+    else { start(); click("type.income"); }
+    for (const value of ["-€12", "−€12", "- EUR 12", "–12", "€ − 12", "− 12 EUR", "➖️ € 12"]) {
+      expect(sent(text(value))[0].text).toContain("Importo non valido");
+      expect(flow.store.getState(chatId)).toMatchObject({ kind: "wizard", step: "amount", values: { amount: null } });
+      expect(flow.store.get(chatId)).toBeUndefined();
+    }
+    text("€ 12,50");
+    expect(flow.store.getState(chatId)).toMatchObject({ kind: "wizard", step: mode === "transfer" ? "fromAccount" : "category", values: { amount: 12.5 } });
   });
 });

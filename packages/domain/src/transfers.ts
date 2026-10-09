@@ -1,4 +1,4 @@
-import { accountIdForAlias, accountPattern } from "./accounts.js";
+import { accountIdForAlias, accountPattern, mentionedAccounts } from "./accounts.js";
 import type { TransferFields } from "./types.js";
 
 const account = accountPattern;
@@ -13,8 +13,11 @@ export function extractTransfer(normalizedText: string): TransferFields | null {
   const from = sides.filter((m) => m.groups?.direction === "da");
   const to = sides.filter((m) => m.groups?.direction === "a");
   const complete = route.test(normalizedText);
+  // Every account mention must belong to a directional side. Extra counterparties or
+  // alternatives (including aliases of an existing side) require clarification.
+  const extraAccounts = mentionedAccounts(normalizedText.replace(side, " "));
   // Multiple routes or disconnected mentions are ambiguous; do not silently choose one.
-  if (from.length > 1 || to.length > 1 || (from.length && to.length && !complete)) {
+  if (extraAccounts.length > 0 || from.length > 1 || to.length > 1 || (from.length && to.length && !complete)) {
     return { type: "transfer", fromAccount: null, toAccount: null };
   }
   return {

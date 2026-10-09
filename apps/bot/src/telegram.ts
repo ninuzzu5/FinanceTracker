@@ -118,7 +118,7 @@ export function decideUpdate(
       reply: result.reason === "same_transfer_accounts"
         ? "Bro, conto di origine e destinazione devono essere diversi. Prova: 100 da revolut a isybank"
         : result.reason === "incomplete_transfer"
-          ? "Bro, indica entrambi i conti del trasferimento: da <conto> a <conto>. Per esempio: 100 da revolut a isybank. Non posso scegliere il conto mancante."
+          ? "Bro, indica entrambi i conti del trasferimento, un solo conto di origine e un solo conto di destinazione: da <conto> a <conto>. Per esempio: 100 da revolut a isybank. Non posso scegliere conti mancanti o ambigui."
         : result.reason === "invalid_or_ambiguous_date"
         ? "Bro, questa data non è valida oppure ne vedo più di una 👀\nScrivine una sola, per esempio: 10 settembre 2026 tabacco 12€"
         : result.reason === "ambiguous_account"

@@ -59,3 +59,20 @@ describe("cash transfer routes", () => {
     expect(parseMessage("100 da cash a revolut da liquidi a isybank", options)).toMatchObject({ type: "transfer", fromAccount: null, toAccount: null });
   });
 });
+
+describe("B5 — extra account mentions", () => {
+  it.each([
+    "12 da contanti a revolut e isybank", "20 da revolut a isybank o contanti",
+    "12 da cash a revolut e isy", "20 da revolut a isy bank o liquidi",
+    "12 da liquidi a revolut, isybank", "12 isybank da contanti a revolut",
+    "12 da contanti a revolut (isybank)", "12 da cash a revolut o liquidi",
+    "12 da revolut a isybank oppure revolut", "12 da cash revolut",
+  ])("requires clarification for %s", text => {
+    expect(parseMessage(text, options)).toMatchObject({ type: "transfer", fromAccount: null, toAccount: null });
+    expect(classifyMessage(text)).toMatchObject({ type: "transfer", category: null, source: "unknown" });
+  });
+  it.each(["cash", "liquidi", "contanti"])("keeps unambiguous routes using %s", alias => {
+    expect(parseMessage(`12 da ${alias} a revolut stipendio`, options)).toMatchObject({ type: "transfer", fromAccount: "contanti", toAccount: "revolut" });
+    expect(parseMessage(`20 da isy bank a ${alias} spesa`, options)).toMatchObject({ type: "transfer", fromAccount: "isybank", toAccount: "contanti" });
+  });
+});

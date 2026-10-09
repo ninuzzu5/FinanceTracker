@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseMessage } from "../src/index.js";
+import { parseMessage, parseAmountInput } from "../src/index.js";
 
 const now = new Date("2026-09-18T12:00:00Z");
 
@@ -183,5 +183,31 @@ describe("Rome midnight and DST boundaries", () => {
     const date = new Date(instant);
     expect(new Intl.DateTimeFormat("it-IT", { timeZone: "Europe/Rome", hour: "2-digit", minute: "2-digit" }).format(date)).toBe(display);
     expect(date.toISOString()).toBe(instant.replace("Z", ".000Z"));
+  });
+});
+
+describe("B4 — whole signed monetary expressions", () => {
+  it.each(["-€12 spesa revolut", "−€12 spesa revolut", "- EUR 12 spesa revolut", "–12 spesa revolut"])("rejects the reported input %s", input => {
+    expect(parseMessage(input, { now }).amount).toBeNull();
+  });
+  it("rejects Unicode signs, spaces and placements without extracting a positive substring", () => {
+    for (const sign of ["-", "−", "‐", "‑", "‒", "–", "—", "―", "﹣", "－", "⁻", "₋", "➖", "➖️"]) {
+      for (const value of [`${sign}12`, `${sign} 12`, `${sign}€12`, `${sign} € 12`, `€${sign}12`, `€ ${sign} 12`, `${sign} EUR 12`, `EUR ${sign} 12`, `${sign}12€`, `${sign} 12 EUR`, `12€ ${sign}`, `12 ${sign}`]) {
+        expect(parseAmountInput(value), value).toBeNull();
+        for (const text of [`${value} spesa revolut`, `${value} stipendio cash`, `${value} da liquidi a isybank`, `ieri ${value} spesa`, `${value} spesa 10/09/2026`]) {
+          expect(parseMessage(text, { now }).amount, text).toBeNull();
+        }
+      }
+    }
+  });
+  it.each(["- € 12 spesa 5", "- EUR 12 stipendio 5", "€ - 12 e 5", "− € − 12 spesa", "–12,345 spesa", "+ € 12 spesa"])("does not fall back to another amount in %s", input => {
+    expect(parseMessage(input, { now }).amount).toBeNull();
+  });
+  it.each(["€12", "€ 12,50", "12€", "12,50 €", "EUR 12", "12 EUR"])("preserves unsigned currency expression %s", value => {
+    const expected = value.includes("50") ? 12.5 : 12;
+    expect(parseAmountInput(value)).toBe(expected);
+    expect(parseMessage(`${value} pranzo revolut`, { now }).amount).toBe(expected);
+    expect(parseMessage(`${value} stipendio cash`, { now }).amount).toBe(expected);
+    expect(parseMessage(`${value} da cash a isybank`, { now }).amount).toBe(expected);
   });
 });

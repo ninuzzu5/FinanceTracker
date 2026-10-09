@@ -1,4 +1,4 @@
-// B1 expectations now assert safe behavior. Other audit findings remain characterization tests.
+// B1/B4/B5 regression expectations assert safe behavior; the separate B6 finding remains characterized.
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { parseMessage, parseAmountInput } from "@finance-tracker/domain";
 import { ProposalFlow } from "../src/proposal-flow.js";
@@ -72,13 +72,13 @@ describe("Audit — B1 regression", () => {
     await deliverUpdate(restarted,s.transport,confirm(restarted),config,undefined,s.repo);expect(s.ledger).toHaveLength(1);
   });
 });
-describe("Audit — confirmed parser ambiguities",()=>{
-  it.each(["-€12 spesa","−€12 spesa","- EUR 12 spesa","–12 spesa"])("free text silently drops the sign in %s",text=>{
-    expect(parseMessage(text).amount).toBe(12);expect(parseAmountInput(text)).toBeNull();
+describe("Audit — B4/B5 regressions",()=>{
+  it.each(["-€12 spesa","−€12 spesa","- EUR 12 spesa","–12 spesa"])("free text rejects the signed amount in %s",text=>{
+    expect(parseMessage(text).amount).toBeNull();expect(parseAmountInput(text)).toBeNull();
   });
-  it.each(["12 da revolut a contanti isybank","12 da contanti a revolut e isybank"])("accepts a third account in %s",text=>{
+  it.each(["12 da revolut a contanti isybank","12 da contanti a revolut e isybank"])("requests clarification for a third account in %s",text=>{
     const result=parseMessage(text);expect(result.type).toBe("transfer");
-    expect(result.fromAccount).not.toBeNull();expect(result.toAccount).not.toBeNull();
+    expect(result.fromAccount).toBeNull();expect(result.toAccount).toBeNull();
   });
 });
 describe("Audit — adversarial parser invariants",()=>{
@@ -98,5 +98,23 @@ describe("Audit — adversarial parser invariants",()=>{
     for(const date of ["29/02/2025","31/04/2026","0000-01-01","10000-01-01","oggi ieri"])
       expect(parseMessage(`12 tabacco ${date}`).date).toBeNull();
     const p=parseMessage("12 da contanti a cash");expect(p.fromAccount).toBe(p.toAccount);
+  });
+});
+
+describe("B4/B5 — six manual Telegram regressions", () => {
+  it.each([
+    ["-€12 spesa revolut", "importo valido"],
+    ["−€12 spesa revolut", "importo valido"],
+    ["- EUR 12 spesa revolut", "importo valido"],
+    ["–12 spesa revolut", "importo valido"],
+    ["12 da contanti a revolut e isybank", "conti mancanti o ambigui"],
+    ["20 da revolut a isybank o contanti", "conti mancanti o ambigui"],
+  ])("rejects %s before proposal and persistence", async (text, clarification) => {
+    const s = fixture();
+    await s.deliver(message(text));
+    expect(s.flow.store.getState(chat)).toBeUndefined();
+    expect(s.ledger).toHaveLength(0);
+    expect(s.transport.sendMessage).toHaveBeenCalledWith(chat, expect.stringContaining(clarification), undefined, undefined);
+    expect(s.transport.sendMessage.mock.calls.some(call => call[3]?.inline_keyboard?.flat().some((button: { text: string }) => button.text.includes("Conferma")))).toBe(false);
   });
 });
