@@ -4,12 +4,15 @@ import { decideUpdate, isRecord, updateId, type TelegramConfig } from "./telegra
 import { ProposalStore, categoriesFor, type Proposal } from "./proposals.js";
 import { backKeyboard, choicesKeyboard, fieldKeyboard, proposalKeyboard, proposalText, type InlineKeyboard } from "./proposal-view.js";
 import { PersistenceError, persistenceMessage } from "./persistence.js";
+import { cashInput, reconciliationView, reconciliationMessage, ReconciliationError, type CashPreview, type CashReceipt, type CashRequest } from "./reconciliation.js";
 import { GuidedEntry } from "./wizard.js";
 
 export type FlowEffect =
   | { kind: "send"; chatId: number; text: string; keyboard?: InlineKeyboard }
   | { kind: "answer"; queryId: string; text: string }
   | { kind: "persist"; chatId: number; messageId: number; proposal: Proposal }
+  | { kind: "loadCash"; chatId: number; stateId: string; date: string }
+  | { kind: "reconcileCash"; chatId: number; messageId: number; stateId: string; request: CashRequest }
   | { kind: "clearButtons"; chatId: number; messageId: number };
 
 const stale = "Proposta scaduta, chiusa o sostituita. Usa l'ultima anteprima o invia un nuovo messaggio.";
@@ -28,13 +31,27 @@ export class ProposalFlow {
     if (decision.kind === "ignore") return [];
     if (this.saving.has(decision.chatId)) return [send(decision.chatId, "Salvataggio in corso, bro. Aspetta la conferma.")];
     const message = (update.message ?? update.edited_message) as { message_id: number; text: string };
-    const command = /^\/(start|menu|cancel)(?:@niuzzu_bot)?(?:\s|$)/i.exec(message.text.trim());
+    const command = /^\/(start|menu|cancel|riconcilia)(?:@niuzzu_bot)?(?:\s|$)/i.exec(message.text.trim());
     if (command) {
+      if (command[1].toLowerCase() === "riconcilia") return [send(decision.chatId, ...this.cashViewArgs(decision.chatId, true))];
       if (command[1].toLowerCase() !== "cancel") return this.guided.menu(decision.chatId);
+      const wasUncertain = this.store.getState(decision.chatId)?.kind === "reconciliation" && (this.store.getState(decision.chatId) as { step?: string }).step === "uncertain";
       this.store.remove(decision.chatId);
+      if (wasUncertain) return [send(decision.chatId, "Flusso chiuso. L'esito resta incerto: non ho annullato eventuali rettifiche nel database.")];
       return [send(decision.chatId, "❌ Flusso annullato, bro. Scrivimi un movimento oppure usa /menu.")];
     }
     if (decision.kind === "help") return [send(decision.chatId, decision.reply)];
+    const cash = this.store.getState(decision.chatId);
+    if (cash?.kind === "reconciliation") {
+      if (cash.step !== "amount") return [send(decision.chatId, "Usa i pulsanti della riconciliazione o /cancel.")];
+      const amount = cashInput(message.text);
+      if (amount === null) return [send(decision.chatId, "Saldo reale non valido: scrivi un importo non negativo con massimo due decimali, per esempio 12,50 oppure 0.")];
+      cash.observed = amount;
+      cash.step = "preview";
+      cash.revision++;
+      const view = reconciliationView(cash);
+      return [send(decision.chatId, view.text, view.keyboard)];
+    }
     const wizardReply = this.guided.text(decision.chatId, message.text, config, now);
     if (wizardReply) return wizardReply;
     const p = this.store.get(decision.chatId);
@@ -65,6 +82,41 @@ export class ProposalFlow {
     return [preview(decision.chatId, proposal, p ? `${title}\nQuesta proposta sostituisce la precedente.` : title)];
   }
 
+  private cashViewArgs(chatId: number, start = false): [string, InlineKeyboard] {
+    const state = start ? this.store.startReconciliation(chatId) : this.store.getState(chatId);
+    if (state?.kind !== "reconciliation") throw new Error("Missing cash state");
+    const view = reconciliationView(state);
+    return [view.text, view.keyboard];
+  }
+
+  completeCashLoad(effect: Extract<FlowEffect, { kind: "loadCash" }>, result?: CashPreview, error?: unknown): FlowEffect[] {
+    this.saving.delete(effect.chatId);
+    const state = this.store.getState(effect.chatId);
+    if (state?.kind !== "reconciliation" || state.id !== effect.stateId) return [];
+    if (error !== undefined || !result) {
+      this.store.remove(effect.chatId);
+      return [send(effect.chatId, reconciliationMessage(error))];
+    }
+    state.accountId = result.accountId; state.theoretical = result.theoretical; state.step = "amount"; state.revision++;
+    return [send(effect.chatId, ...this.cashViewArgs(effect.chatId))];
+  }
+
+  completeCashSave(effect: Extract<FlowEffect, { kind: "reconcileCash" }>, result?: CashReceipt, error?: unknown): FlowEffect[] {
+    this.saving.delete(effect.chatId);
+    const state = this.store.getState(effect.chatId);
+    if (error !== undefined || !result) {
+      if (state?.kind !== "reconciliation" || state.id !== effect.stateId) return [send(effect.chatId, reconciliationMessage(error))];
+      if (!(error instanceof ReconciliationError) || error.code === "unknown") {
+        state.step = "uncertain"; state.revision++;
+        return [send(effect.chatId, reconciliationMessage(error)), send(effect.chatId, ...this.cashViewArgs(effect.chatId))];
+      }
+      this.store.remove(effect.chatId);
+      return [send(effect.chatId, reconciliationMessage(error))];
+    }
+    if (state?.kind === "reconciliation" && state.id === effect.stateId) this.store.remove(effect.chatId);
+    return [{ kind: "clearButtons", chatId: effect.chatId, messageId: effect.messageId }, send(effect.chatId, `✅ Contanti riconciliati al ${effect.request.date}. Rettifica: ${result.delta} €. Saldo dichiarato: ${result.observed} €. Giornata chiusa.`)];
+  }
+
   completeSave(effect: Extract<FlowEffect, { kind: "persist" }>, error?: unknown): FlowEffect[] {
     this.saving.delete(effect.chatId);
     if (error !== undefined) {
@@ -87,6 +139,33 @@ export class ProposalFlow {
         String(query.from.id) !== config.allowedChatId || !Number.isSafeInteger(chat.id)) return [];
     const chatId = chat.id as number;
     if (this.saving.has(chatId)) return [{ kind: "answer", queryId: query.id, text: "Salvataggio in corso." }];
+    if (query.data.startsWith("r:")) {
+      const state = this.store.getState(chatId);
+      const match = /^r:([a-f0-9]{16}):(\d+):(today|yesterday|confirm|edit|cancel)$/.exec(query.data);
+      const answer = (text: string): FlowEffect => ({ kind: "answer", queryId: query.id as string, text });
+      if (!match || state?.kind !== "reconciliation" || state.id !== match[1] || state.revision !== Number(match[2])) return [answer(stale)];
+      const action = match[3];
+      if (action === "cancel") {
+        const uncertain = state.step === "uncertain";
+        this.store.remove(chatId);
+        return [answer("Flusso chiuso."), { kind: "clearButtons", chatId, messageId: query.message.message_id as number }, send(chatId, uncertain ? "Flusso chiuso: l'esito resta incerto; nessuna rettifica nel database è stata annullata." : "Riconciliazione annullata: nessuna rettifica salvata.")];
+      }
+      if (state.step === "date" && (action === "today" || action === "yesterday")) {
+        state.date = parseDateInput(action === "today" ? "oggi" : "ieri", now, "Europe/Rome");
+        state.step = "loading"; state.revision++; this.saving.add(chatId);
+        return [answer("Leggo Contanti."), { kind: "loadCash", chatId, stateId: state.id, date: state.date! }];
+      }
+      if (state.step === "preview" && action === "edit") {
+        state.step = "amount"; state.revision++;
+        return [answer(""), send(chatId, ...this.cashViewArgs(chatId))];
+      }
+      if ((state.step === "preview" || state.step === "uncertain") && action === "confirm") {
+        state.step = "saving"; this.saving.add(chatId);
+        return [answer("Salvataggio in corso."), { kind: "reconcileCash", chatId, stateId: state.id, messageId: query.message.message_id as number,
+          request: { accountId: state.accountId!, date: state.date!, expected: state.theoretical!, observed: state.observed!, requestId: state.requestId } }];
+      }
+      return [answer("Usa il pulsante del passaggio corrente.")];
+    }
     if (query.data.startsWith("m:") || query.data.startsWith("w:")) return this.guided.callback(chatId, query.id, query.data, config, now);
     const answer = (text: string): FlowEffect[] => [{ kind: "answer", queryId: query.id as string, text }];
     const match = /^p:([a-f0-9]{16}):(\d+):([a-zA-Z_.]+)$/.exec(query.data);

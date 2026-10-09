@@ -1,3 +1,4 @@
+import type { ReconciliationRepository } from "./reconciliation.js";
 import type { TransactionRepository } from "./persistence.js";
 import { supabaseRepository } from "./supabase.js";
 import type { TelegramConfig } from "./telegram.js";
@@ -6,10 +7,20 @@ import type { TelegramClient } from "./transport.js";
 
 export async function deliverUpdate(
   flow: ProposalFlow, client: Pick<TelegramClient, "call" | "sendMessage">,
-  update: unknown, config: TelegramConfig, signal?: AbortSignal, repository: TransactionRepository = supabaseRepository,
+  update: unknown, config: TelegramConfig, signal?: AbortSignal, repository: TransactionRepository = supabaseRepository, reconciliation: ReconciliationRepository = supabaseRepository,
 ): Promise<void> {
   const effects = flow.handle(update, config);
   for (const effect of effects) {
+    if (effect.kind === "loadCash" || effect.kind === "reconcileCash") {
+      try {
+        if (effect.kind === "loadCash") effects.push(...flow.completeCashLoad(effect, await reconciliation.previewCash(effect.date)));
+        else effects.push(...flow.completeCashSave(effect, await reconciliation.reconcileCash(effect.request)));
+      } catch (error) {
+        const failure = error ?? new Error("Cash operation failed");
+        effects.push(...(effect.kind === "loadCash" ? flow.completeCashLoad(effect, undefined, failure) : flow.completeCashSave(effect, undefined, failure)));
+      }
+      continue;
+    }
     if (effect.kind === "persist") {
       let failure: unknown;
       try { await repository.saveTransaction(effect.proposal); }

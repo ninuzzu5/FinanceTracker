@@ -17,6 +17,7 @@ coverage/
 id_rsa
 id_ed25519
 secrets/
+public/
 
 # Personal financial data and private training material
 exports/

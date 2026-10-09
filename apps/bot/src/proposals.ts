@@ -1,5 +1,6 @@
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { expenseCategoryIds, incomeCategoryIds, type CategoryId, type TransactionType, type TransactionDraft } from "@finance-tracker/domain";
+import type { ReconciliationState } from "./reconciliation.js";
 import type { MenuState, WizardState } from "./wizard-state.js";
 
 export type ProposalValues = TransactionDraft;
@@ -16,7 +17,7 @@ export function categoriesFor(type: TransactionType | null): readonly CategoryId
   return type === "expense" ? expenseCategoryIds : type === "income" ? incomeCategoryIds : [];
 }
 
-export type ConversationState = { kind: "proposal"; proposal: Proposal } | WizardState | MenuState;
+export type ConversationState = { kind: "proposal"; proposal: Proposal } | WizardState | MenuState | ReconciliationState;
 
 /** One active menu, wizard or proposal per chat; a shared expiry and no raw messages. */
 export class ProposalStore {
@@ -43,6 +44,12 @@ export class ProposalStore {
 
   openMenu(chatId: number): MenuState {
     const state: MenuState = { kind: "menu", id: randomBytes(8).toString("hex") };
+    this.put(chatId, state);
+    return state;
+  }
+
+  startReconciliation(chatId: number): ReconciliationState {
+    const state: ReconciliationState = { kind: "reconciliation", id: randomBytes(8).toString("hex"), requestId: randomUUID(), revision: 0, step: "date", date: null, accountId: null, theoretical: null, observed: null };
     this.put(chatId, state);
     return state;
   }

@@ -1,6 +1,6 @@
 # Supabase
 
-This directory versions the Supabase 01 application schema and ownership policies. Migrations 001 and 002 are a baseline for a fresh Supabase database. Migration 003 is the separate category-constraint correction for an existing database. Migration 004 adds optional account openings and authenticated balance calculation. No migration has been applied remotely by this task.
+This directory versions the Supabase 01 application schema and ownership policies. Migrations 001 and 002 are a baseline for a fresh Supabase database. Migration 003 is the separate category-constraint correction for an existing database. Migration 004 adds optional account openings and authenticated balance calculation. Migration 005 adds cash reconciliation and protection of closed cash days. No migration has been applied remotely by this task.
 
 ## Migration order
 
@@ -9,6 +9,7 @@ This directory versions the Supabase 01 application schema and ownership policie
 3. `migrations/003_enforce_transaction_category.sql` replaces only `transactions_category_by_type_check` in legacy databases where that constraint exists but does not enforce the correct category rule. Skip 003 for fresh databases created with the corrected 001 and for the existing Supabase project: its constraint has already been verified as correct, so no migration is needed.
 
 4. `migrations/004_account_openings_and_balances.sql` incrementally adds nullable opening fields and `get_account_balances(date)`. It needs the existing accounts/transactions schema and RLS, not legacy migration 003.
+5. `migrations/005_cash_reconciliation.sql` requires 004 and adds separate adjustment records, authenticated reconciliation RPCs and closure guards.
 
 Apply the baseline files 001 and 002 once, in order, as part of provisioning a new database, before exposing application access. They intentionally fail if the tables or policies already exist. Each file is transactional. Do not replay this baseline against the existing Supabase project; reconciling an existing database with migration history is separate work.
 
@@ -244,3 +245,126 @@ Risultati di riferimento dei test, con aperture sintetiche Isybank −10 €, Re
 Sono coperti anche precisione, aperture negative/rifiutate, date diverse, conti
 inattivi, modifiche retroattive, RLS tra due utenti, accesso anonimo e JWT assente.
 La verifica locale non certifica il catalogo o l'infrastruttura Auth remoti.
+
+## Milestone 2: riconciliazione Contanti
+
+La migrazione `migrations/005_cash_reconciliation.sql` va applicata **dopo 004**.
+Nessuna migrazione di questa task è stata eseguita sul progetto remoto.
+
+### Controlli e applicazione manuale
+
+1. In **Supabase → progetto corretto → SQL Editor**, verifica prima solo i metadati:
+
+   ```sql
+   select to_regclass('public.account_adjustments') as existing_adjustments;
+   select pg_get_functiondef('public.get_account_balances(date)'::regprocedure);
+   select relname, relrowsecurity from pg_class
+   where oid in ('public.accounts'::regclass, 'public.transactions'::regclass);
+   select tablename, policyname, roles, cmd, qual, with_check
+   from pg_policies where schemaname = 'public'
+     and tablename in ('accounts','transactions');
+   select conname, pg_get_constraintdef(oid)
+   from pg_constraint where conrelid in ('public.accounts'::regclass,'public.transactions'::regclass);
+   select proname, pg_get_function_identity_arguments(oid)
+   from pg_proc where pronamespace = 'public'::regnamespace
+     and proname in ('preview_cash_reconciliation','reconcile_cash',
+       'guard_reconciled_cash_transactions','guard_reconciled_cash_accounts','guard_adjustment_changes');
+   select tgname, pg_get_triggerdef(oid) from pg_trigger
+   where not tgisinternal and tgrelid in ('public.accounts'::regclass,'public.transactions'::regclass);
+   ```
+
+2. Confronta la RPC con 004, i vincoli/ownership con 001/004 e le policy con 002.
+   `account_adjustments` e le nuove funzioni/trigger devono essere assenti, RLS attiva.
+   Il preflight integrato controlla RLS, firma/stabilità della RPC e presenza dei
+   vincoli di apertura; **non certifica policy personalizzate o l'intero schema remoto**.
+   Se ci sono differenze o oggetti già esistenti, fermati e confrontali: non eliminarli
+   né rilanciare le vecchie migrazioni. Il catalogo remoto non è stato verificato.
+3. Prova prima su un progetto Supabase di test separato. Ferma temporaneamente il bot
+   durante l'allineamento. Nel SQL Editor, con ruolo amministrativo fidato, incolla
+   **l'intero file 005**, incluso BEGIN/COMMIT, ed eseguilo una sola volta. Non servono
+   seed, modifiche alle transazioni o nuovi saldi iniziali. La migrazione è transazionale;
+   un errore richiede ROLLBACK nella sessione prima di procedere. La creazione dei trigger
+   richiede lock DDL: scegli una finestra senza scritture dell'applicazione.
+4. Verifica tabella, policy e funzioni create; distribuisci/riavvia il bot aggiornato.
+   Se PostgREST segnala una funzione non trovata dopo l'applicazione, attendi il refresh
+   del catalogo; se necessario esegui `NOTIFY pgrst, 'reload schema';` nel SQL Editor.
+   Non applicare 001/002/004 nuovamente a un database già allineato.
+
+### Modello contabile, autorizzazioni e limiti
+
+`account_adjustments` conserva UUID, proprietario, conto, data effettiva, differenza
+firmata (`delta`), saldo dichiarato (`observed_balance`), chiave UUID della richiesta,
+`created_at` e `voided_at`. Quest'ultimo è predisposto per il tracciamento futuro:
+**annullare una rettifica già confermata non è disponibile**. UPDATE/DELETE delle
+rettifiche sono bloccati; non si perde la traccia storica. Annulla in Telegram interrompe
+solo il flusso, e un esito incerto può già corrispondere a una scrittura completata.
+
+La tabella ha RLS di lettura per proprietario. I client autenticati non hanno permessi
+di INSERT/UPDATE/DELETE. Solo `reconcile_cash` scrive, come SECURITY DEFINER con
+search_path vuoto e controlli espliciti di `auth.uid()`, proprietà, apertura, conto
+Contanti attivo e EUR. Non accetta un user_id esterno. È necessario mantenere la
+funzione sotto un proprietario amministrativo fidato. `preview_cash_reconciliation`
+e `get_account_balances` restano SECURITY INVOKER, con filtri espliciti e RLS;
+anche i trigger di protezione dei movimenti/conti rispettano i privilegi del chiamante.
+Nessun accesso RPC è concesso ad anon/PUBLIC; un JWT assente è rifiutato.
+
+Il saldo è apertura + movimenti + rettifiche non annullate nell'intervallo inclusivo.
+Non esiste saldo corrente memorizzato. La RPC di conferma blocca la riga Contanti,
+ricalcola il teorico e confronta il saldo mostrato nell'anteprima: se è cambiato,
+non scrive e richiede una nuova anteprima. La differenza può essere positiva,
+negativa o zero; il saldo dichiarato non può essere negativo. SQL usa `numeric`
+con CHECK sui centesimi, senza arrotondare valori incompatibili. Le RPC di
+riconciliazione trasportano importi come stringhe decimali; il bot usa BigInt per
+calcolare/mostrare la differenza, senza somme floating point.
+
+Il giorno è chiuso **a fine giornata, Europe/Rome**, includendo tutti i movimenti
+con quella data. Il bot offre oggi o ieri; chiudere oggi significa non poter più
+registrare movimenti Contanti oggi. Una chiusura blocca nuovi movimenti, modifiche
+e cancellazioni fino a quella data, su entrambe le direzioni dei trasferimenti e
+sui riferimenti vecchi/nuovi. Blocca anche modifiche all'apertura, nome, tipo,
+proprietario o valuta del conto riconciliato. Movimenti bancari senza Contanti e
+movimenti Contanti di giornate successive restano disponibili. Cambiare `is_active`
+resta possibile. La riapertura verrà gestita in una milestone distinta.
+
+I trigger e la RPC condividono il lock del conto. La chiave univoca per utente
+rende idempotente il ritentativo con stesso payload; una chiave riutilizzata con
+dati diversi è rifiutata. Un indice univoco impedisce due rettifiche attive nello
+stesso giorno/conto, anche con chiavi diverse. Le scritture Contanti richiedono
+READ COMMITTED, il livello normale PostgREST; livelli con snapshot persistenti
+sono rifiutati per evitare controlli su chiusure non aggiornate.
+
+Il flusso Telegram usa lo store esistente in memoria, con scadenza di 30 minuti:
+un riavvio perde la conversazione. Il database conserva l'idempotenza e la chiusura,
+ma non c'è ancora un comando per recuperare una ricevuta dopo un riavvio. Le richieste
+HTTP hanno timeout di 15 secondi; un timeout non garantisce rollback sul server.
+Il pulsante di ritentativo mantiene richiesta e chiave; Annulla non cancella scritture
+incerte. La duplicazione rimane impedita dal database anche dopo un riavvio.
+
+### Verifica automatica isolata
+
+`run-account-balances.mjs` applica anche 005, riesegue i test 004 contro la nuova RPC,
+e verifica `cash_reconciliation.sql`: date, centesimi, rettifiche positive/negative/
+zero, replay, proprietà, RLS, anon/JWT assente e protezioni retroattive. Tutte le
+fixture sono sintetiche e terminano con ROLLBACK.
+
+Per la concorrenza serve PostgreSQL nativo con sessioni distinte. Nessuna dipendenza
+è aggiunta al progetto: puoi installare il runtime in una cartella temporanea.
+
+```sh
+npm install --prefix /private/tmp/financetracker-concurrency-runtime --no-save --package-lock=false embedded-postgres@18.4.0-beta.17
+node supabase/tests/run-cash-concurrency.mjs /private/tmp/financetracker-concurrency-runtime/node_modules/embedded-postgres/dist/index.js
+```
+
+Lascia abilitati gli script di installazione del runtime: ripristinano i symlink
+necessari ai binari. Il runner crea un nuovo cluster temporaneo, solo socket Unix
+locale, senza TCP o URL remoti, e lo elimina al termine. Sono verificati cinque
+casi con attesa reale del lock: stesso request_id, movimento dopo una riconciliazione,
+conferma dopo un movimento, chiavi concorrenti diverse e rollback della chiusura.
+È verificato anche il rifiuto di REPEATABLE READ. Su sistemi senza socket Unix il
+runner va adattato; non sostituirne la destinazione con un database personale.
+
+Per verifiche manuali usa solo un progetto di test separato e un'apertura documentata
+per quell'ambiente. Gli importi delle fixture non sono suggerimenti per i tuoi conti.
+Dopo conferma controlla che sia comparsa **una riga account_adjustments** e nessuna
+nuova riga transactions, e leggi get_account_balances con la sessione autenticata
+reale dell'utente di test. Non simulare claim nel progetto personale.

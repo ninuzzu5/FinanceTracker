@@ -42,6 +42,13 @@ try {
   const fixture = await read("account_balances.sql");
   await db.exec(fixture);
   assert.equal((await db.query("select count(*)::int as n from public.accounts")).rows[0].n, 1);
+  await db.exec(await read("../migrations/005_cash_reconciliation.sql"));
+  assert.deepEqual((await db.query("select * from public.transactions")).rows, before);
+  await db.exec(fixture); // Re-run Milestone 1 against the replacement RPC.
+  const cashFixture = await read("cash_reconciliation.sql");
+  await db.exec(cashFixture);
+  assert.equal((await db.query("select count(*)::int as n from public.account_adjustments")).rows[0].n, 0);
+  console.log(`Cash SQL passed: ${(cashFixture.match(/select pg_temp\.(check_true|expect_error)/g) ?? []).length} assertions; fixtures rolled back.`);
   const checks = (fixture.match(/select pg_temp\.(assert_balance|expect_error)/g) ?? []).length;
   console.log(`SQL integration passed: ${checks} balance/error assertions, RLS and migration preservation checks. Fixtures rolled back.`);
 } finally {

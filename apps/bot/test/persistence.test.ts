@@ -48,16 +48,16 @@ describe("Supabase transaction persistence", () => {
     expect(accountsQuery.eq).toHaveBeenCalledWith("user_id", user);
     expect(accountsQuery.eq).toHaveBeenCalledWith("is_active", true);
     expect(insertQuery.insert).toHaveBeenCalledWith({ user_id: user, type: transaction.type, amount: 12.5, transaction_date: expense.date, category, from_account_id: from, to_account_id: to });
-    expect(sdk.createClient).toHaveBeenCalledWith(credentials.url, credentials.anonKey, { auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false } });
+    expect(sdk.createClient).toHaveBeenCalledWith(credentials.url, credentials.anonKey, { auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false }, global: { fetch: expect.any(Function) } });
   });
   it.each([
     [{ loginError: true }, "authentication"], [{ sessionInvalid: true }, "session"],
     [{ accountsError: "XX000" }, "accounts_query"], [{ rows: [] }, "account_missing"],
-    [{ insertError: "XX000" }, "insert"], [{ insertError: "23514" }, "constraint"], [{ insertError: "42501" }, "rls"],
+    [{ insertError: "XX000" }, "insert"], [{ insertError: "23514" }, "constraint"], [{ insertError: "42501" }, "rls"], [{ insertError: "PT423" }, "closed"],
   ] as const)("propagates safe error %s", async (options, code) => {
     const { repository, insertQuery } = setup(options);
     await expect(repository.saveTransaction(expense)).rejects.toMatchObject({ code, message: `Transaction persistence failed: ${code}` });
-    if (!["insert", "constraint", "rls"].includes(code)) expect(insertQuery.insert).not.toHaveBeenCalled();
+    if (!["insert", "constraint", "rls", "closed"].includes(code)) expect(insertQuery.insert).not.toHaveBeenCalled();
   });
   it("reuses valid session and verifies the user before queries", async () => {
     const { repository, client } = setup();

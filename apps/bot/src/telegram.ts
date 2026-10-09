@@ -97,6 +97,7 @@ export function decideUpdate(
         `Senza data uso oggi; per entrate/uscite senza conto uso ${accountLabels[defaultAccount]}. Per i trasferimenti scrivi entrambi i conti.`,
         "Con /start o /menu scegli Nuovo movimento o Trasferimento e ti guido passo passo.",
         "Con /cancel annulli la compilazione o proposta attiva. /menu la chiude e riparte dal menu.",
+        "Con /riconcilia dichiari il saldo Contanti a fine giornata; la conferma chiude il giorno ai movimenti retroattivi.",
         "Con /help ritrovi questi esempi senza interrompere il flusso.",
         "Se modifichi un messaggio, ti mando una nuova anteprima.",
         "Provo a riconoscere tipo e categoria; se ho dubbi, li lascio da confermare.",

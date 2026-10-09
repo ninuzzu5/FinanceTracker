@@ -236,3 +236,40 @@ Prima di confermare un movimento Contanti, crea manualmente il conto come
 descritto in [supabase/README.md](../supabase/README.md#configurazione-manuale-del-conto-contanti).
 Se manca o non è attivo, il bot mostra l'errore esistente per conto non disponibile.
 Non sono implementati saldi iniziali, riconciliazione o descrizioni.
+
+## Riconciliazione Contanti (migrazione 005)
+
+Dopo l'applicazione manuale di 005, `/riconcilia` legge l'unico conto Contanti attivo
+in EUR del proprietario del bot. Scegli oggi o ieri a fine giornata, inserisci il
+saldo contato (anche `0`), verifica teorico/dichiarato/rettifica e premi Conferma.
+`Cambia saldo` torna all'importo; Annulla e `/cancel` chiudono il flusso senza scrivere,
+finché non è partita una conferma. Dopo un timeout, Annulla non annulla eventuali
+scritture già completate: ritenta dalla stessa anteprima per mantenere la chiave.
+Un conto senza entrambe le aperture configurate viene rifiutato.
+
+La chiusura include tutto il giorno, fuso Europe/Rome; chiudere oggi impedisce altri
+movimenti Contanti oggi. Date successive restano utilizzabili. Nessuna rettifica
+è una spesa, entrata o trasferimento. Riapertura e annullamento di rettifiche
+confermate non sono disponibili. Una differenza zero chiude comunque la giornata.
+
+Test manuali **nel progetto di test**, dopo l'allineamento del database:
+
+1. Con apertura assente: `/riconcilia` → Contanti oggi. Atteso: errore apertura,
+   nessuna richiesta di importo e nessuna scrittura.
+2. Con apertura verificata per l'ambiente di test: `/riconcilia` → Contanti ieri
+   → `12,50` (sostituisci con il saldo realmente contato per il test). Controlla
+   la differenza, premi Cambia saldo → `0` → Annulla. Nessuna rettifica salvata.
+3. Ripeti con il saldo contato e Conferma. Controlla una sola riga in
+   account_adjustments e saldo RPC uguale al dichiarato a fine giornata. Premi
+   nuovamente il vecchio pulsante: nessuna riga aggiuntiva.
+4. Dopo chiusura di ieri: `1 caffè contanti ieri` e `trasferisci 1 da Revolut a
+   Contanti ieri`. Conferma ciascuna proposta: atteso errore giornata riconciliata,
+   nessuna transazione inserita. Prova anche il trasferimento nella direzione inversa.
+5. `/riconcilia` → ieri già chiuso: atteso blocco con richiesta di riapertura non
+   disponibile. Un movimento oggi (se non chiuso) deve ancora funzionare.
+6. Prima della conferma, registra da un altro client autenticato di test un movimento
+   Contanti dello stesso giorno: la vecchia anteprima deve fallire per saldo cambiato.
+   Avvia una nuova `/riconcilia`. Per timeout e concorrenza usa anche i test automatici.
+
+Non usare questi esempi per inserire denaro inventato nei conti personali; gli
+importi sono input di prova da adattare nell'ambiente isolato.

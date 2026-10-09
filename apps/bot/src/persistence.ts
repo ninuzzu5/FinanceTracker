@@ -1,6 +1,6 @@
 import { accountIds, amountInCents, expenseCategoryIds, incomeCategoryIds, type AccountId, type TransactionDraft } from "@finance-tracker/domain";
 
-export type PersistenceErrorCode = "configuration" | "authentication" | "session" | "accounts_query" | "account_missing" | "mapping" | "insert" | "constraint" | "rls";
+export type PersistenceErrorCode = "closed" | "configuration" | "authentication" | "session" | "accounts_query" | "account_missing" | "mapping" | "insert" | "constraint" | "rls";
 export class PersistenceError extends Error {
   constructor(readonly code: PersistenceErrorCode) { super(`Transaction persistence failed: ${code}`); }
 }
@@ -45,6 +45,7 @@ export function mapTransaction(transaction: TransactionDraft, userId: string, ac
 
 export function persistenceMessage(error: unknown): string {
   const code = error instanceof PersistenceError ? error.code : "insert";
+  if (code === "closed") return "La giornata Contanti è già riconciliata. Il movimento richiede una riapertura, non ancora disponibile.";
   if (code === "account_missing") return "Bro, il conto richiesto non è disponibile nel database. Controlla i conti prima di riprovare.";
   if (code === "configuration" || code === "authentication" || code === "session") return "Bro, non riesco ad accedere al database. Controlla la configurazione del bot prima di riprovare.";
   if (code === "mapping" || code === "constraint") return "Bro, il database non accetta questi dati. Controlla la proposta prima di riprovare.";
