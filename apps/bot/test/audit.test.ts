@@ -51,17 +51,17 @@ describe("Audit — B1 regression", () => {
   it("the same Telegram update cannot create a second saved movement",async()=>{
     const s=fixture();const update=message("12 tabacco revolut");
     await s.deliver(update);await s.deliver(confirm(s.flow));
-    await s.deliver(update);await s.deliver(confirm(s.flow));expect(s.ledger).toHaveLength(1);
+    await s.deliver(update);expect(s.flow.store.get(chat)).toBeUndefined();expect(s.ledger).toHaveLength(1);
   });
   it("editing a saved source cannot create another movement",async()=>{
     const s=fixture();await s.deliver(message("12 tabacco revolut"));await s.deliver(confirm(s.flow));
-    await s.deliver({update_id:2,edited_message:message("13 tabacco revolut").message});await s.deliver(confirm(s.flow));
+    await s.deliver({update_id:2,edited_message:message("13 tabacco revolut").message});expect(s.flow.store.get(chat)).toBeUndefined();
     expect(s.ledger).toHaveLength(1);expect(s.ledger[0]).toMatchObject({p_amount:"12.00"});
   });
-  it("editing the active source to /help leaves its old amount confirmable",async()=>{
+  it("editing the active source to /help invalidates the old amount",async()=>{
     const s=fixture();await s.deliver(message("12 tabacco revolut"));
     await s.deliver({update_id:2,edited_message:message("/help").message});
-    expect(s.flow.store.get(chat)?.amount).toBe(12);await s.deliver(confirm(s.flow));expect(s.ledger).toHaveLength(1);
+    expect(s.flow.store.get(chat)).toBeUndefined();expect(s.ledger).toHaveLength(0);
   });
   it("restarting and replaying the original source preserves the operation key",async()=>{
     const s=fixture(true);vi.spyOn(console,"error").mockImplementation(()=>{});
@@ -69,7 +69,7 @@ describe("Audit — B1 regression", () => {
     s.flow.store.clear();const restarted=new ProposalFlow();flows.push(restarted);
     await deliverUpdate(restarted,s.transport,old,config,undefined,s.repo);expect(s.ledger).toHaveLength(1);
     await deliverUpdate(restarted,s.transport,message("12 tabacco revolut"),config,undefined,s.repo);
-    await deliverUpdate(restarted,s.transport,confirm(restarted),config,undefined,s.repo);expect(s.ledger).toHaveLength(1);
+    expect(restarted.store.get(chat)).toBeUndefined();expect(s.ledger).toHaveLength(1);
   });
 });
 describe("Audit — B4/B5 regressions",()=>{

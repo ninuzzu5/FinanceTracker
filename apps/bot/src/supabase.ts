@@ -1,3 +1,5 @@
+import { historyCents } from "./history.js";
+import type { HistoryRepository, HistoryCursor, HistoryPage, HistoryMovement } from "./history.js";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { accountIds, amountInCents, type TransactionDraft } from "@finance-tracker/domain";
 import { decimalCents, centsDecimal, ReconciliationError, type ReconciliationRepository, type CashPreview, type CashRequest, type CashReceipt } from "./reconciliation.js";
@@ -26,7 +28,7 @@ function queryError(stage: "accounts_query" | "insert", code?: string): Persiste
   return new PersistenceError(code === "PT422" ? "currency" : code === "PT409" ? "conflict" : code === "PT404" ? "account_missing" : code === "22023" ? "mapping" : code === "PGRST202" ? "configuration" : code === "PT423" ? "closed" : code === "42501" ? "rls" : code?.startsWith("23") ? "constraint" : stage);
 }
 
-export class SupabaseTransactionRepository implements TransactionRepository, ReconciliationRepository {
+export class SupabaseTransactionRepository implements TransactionRepository, ReconciliationRepository, HistoryRepository {
   private client?: SupabaseClient;
   private config?: SupabaseConfig;
   constructor(private readonly configuration = readSupabaseConfig, private readonly clientFactory = createClient) {}
@@ -87,6 +89,32 @@ export class SupabaseTransactionRepository implements TransactionRepository, Rec
     } catch (error) { throw error instanceof PersistenceError ? error : new PersistenceError("insert"); }
   }
 
+  async getMovements(cursor: HistoryCursor | null): Promise<HistoryPage> {
+    if (cursor && (!/^\d{4}-\d{2}-\d{2}$/.test(cursor.date) || !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(cursor.id))) throw new PersistenceError('mapping');
+    const { client, userId } = await this.authenticate();
+    try {
+      let query = client.from('transactions').select('id,type,amount::text,transaction_date::text,category,from_account:accounts!transactions_from_account_id_fkey(name,currency),to_account:accounts!transactions_to_account_id_fkey(name,currency)')
+        .eq('user_id', userId).order('transaction_date', { ascending: false }).order('id', { ascending: false }).limit(6);
+      if (cursor) query = query.or(`transaction_date.lt.${cursor.date},and(transaction_date.eq.${cursor.date},id.lt.${cursor.id})`);
+      const { data, error } = await query;
+      if (error || !Array.isArray(data)) throw new PersistenceError('accounts_query');
+      const rows: HistoryMovement[] = data.map(row => {
+        if (!row || typeof row.id !== 'string' || !['expense','income','transfer'].includes(row.type) || typeof row.amount !== 'string' ||
+          !/^\d{4}-\d{2}-\d{2}$/.test(row.transaction_date) || historyCents(row.amount) <= 0n) throw new PersistenceError('mapping');
+        const account = (value: unknown): string | null => {
+          if (value === null) return null;
+          if (!value || Array.isArray(value) || typeof value !== 'object' || !('name' in value) || typeof value.name !== 'string' || !('currency' in value) || value.currency !== 'EUR') throw new PersistenceError('currency');
+          return value.name.replace(/[\r\n\t]/g," ").slice(0,100);
+        };
+        const from = account(row.from_account), to = account(row.to_account);
+        if ((row.type === 'transfer' && (!from || !to)) || (row.type === 'expense' && !from) || (row.type === 'income' && !to)) throw new PersistenceError('mapping');
+        return { id: row.id, type: row.type, amount: row.amount, date: row.transaction_date, category: row.category, from, to };
+      });
+      const visible = rows.slice(0,5), last = visible.at(-1);
+      return { rows: visible, next: rows.length > 5 && last ? {date:last.date,id:last.id} : null };
+    } catch (error) { throw error instanceof PersistenceError ? error : new PersistenceError('accounts_query'); }
+  }
+
   private async cashRpc(name: string, args: Record<string, string>): Promise<Record<string, unknown>> {
     let client: SupabaseClient;
     try { ({ client } = await this.authenticate()); }
@@ -128,4 +156,4 @@ export class SupabaseTransactionRepository implements TransactionRepository, Rec
   }
 
 }
-export const supabaseRepository: TransactionRepository & ReconciliationRepository = new SupabaseTransactionRepository();
+export const supabaseRepository: TransactionRepository & ReconciliationRepository & HistoryRepository = new SupabaseTransactionRepository();

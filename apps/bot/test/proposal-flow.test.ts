@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ProposalFlow, type FlowEffect } from "../src/proposal-flow.js";
 import { ProposalStore } from "../src/proposals.js";
-vi.mock("../src/supabase.js", () => ({ supabaseRepository: { saveTransaction: vi.fn().mockResolvedValue({ id: "synthetic-row" }) } }));
+vi.mock("../src/supabase.js", () => ({ supabaseRepository: { getTransactionReceipt: vi.fn().mockResolvedValue(null), saveTransaction: vi.fn().mockResolvedValue({ id: "synthetic-row" }) } }));
 import { deliverUpdate } from "../src/flow-delivery.js";
 
 const config = { allowedChatId: "123456", messageConfig: { timeZone: "Europe/Rome", defaultAccount: "revolut" as const } };
@@ -216,7 +216,7 @@ describe("temporary proposal flow", () => {
   });
 
   it("delivers inline keyboards, answers callbacks and clears terminal buttons through mocks", async () => {
-    const client = { call: vi.fn().mockResolvedValue(true), sendMessage: vi.fn().mockResolvedValue(undefined) };
+    const client = { call: vi.fn().mockImplementation(async (method: string) => { if (method === 'editMessageText') throw new Error('synthetic edit unavailable'); return true; }), sendMessage: vi.fn().mockResolvedValue(undefined) };
     await deliverUpdate(flow, client, message("8,30 tabacco"), config);
     expect(client.sendMessage.mock.calls[0][3]).toHaveProperty("inline_keyboard");
     const p = flow.store.get(chatId)!;

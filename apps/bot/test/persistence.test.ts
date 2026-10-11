@@ -45,7 +45,7 @@ function setup(options: { loginError?: boolean; sessionInvalid?: boolean; accoun
   sdk.createClient.mockReturnValue(client);
   return { repository: new SupabaseTransactionRepository(() => credentials), client, accountsQuery, insertQuery };
 }
-afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); sdk.createClient.mockReset(); });
+afterEach(() => { messageVersion = 0; vi.useRealTimers(); vi.restoreAllMocks(); sdk.createClient.mockReset(); });
 
 describe("Supabase transaction persistence", () => {
   it.each([
@@ -129,7 +129,8 @@ describe("Supabase transaction persistence", () => {
 });
 
 const config = { allowedChatId: "123456" };
-const message = (text: string) => ({ update_id: 1, message: { message_id: 1, text, chat: { id: 123456, type: "private" } } });
+let messageVersion = 0;
+const message = (text: string) => ({ update_id: ++messageVersion, message: { message_id: 1, text, chat: { id: 123456, type: "private" } } });
 const callback = (flow: ProposalFlow, action: string) => {
   const p = flow.store.get(123456)!;
   return { update_id: 2, callback_query: { id: "synthetic-query", from: { id: 123456 }, data: `p:${p.id}:${p.revision}:${action}`, message: { message_id: 2, chat: { id: 123456, type: "private" } } } };
@@ -137,7 +138,7 @@ const callback = (flow: ProposalFlow, action: string) => {
 describe("confirmation persistence boundary", () => {
   it("does not save preview, edits or cancellation; confirms only once including concurrent clicks", async () => {
     const flow = new ProposalFlow();
-    const client = { call: vi.fn().mockResolvedValue(true), sendMessage: vi.fn().mockResolvedValue(undefined) };
+    const client = { call: vi.fn().mockImplementation(async (method: string) => { if (method === 'editMessageText') throw new Error('synthetic edit unavailable'); return true; }), sendMessage: vi.fn().mockResolvedValue(undefined) };
     let finish!: (result: { id: string }) => void;
     const repository = { getTransactionReceipt: vi.fn().mockResolvedValue(null), saveTransaction: vi.fn(() => new Promise<{ id: string }>(resolve => { finish = resolve; })) };
     const deliver = (update: unknown) => deliverUpdate(flow, client, update, config, undefined, repository);
@@ -165,7 +166,7 @@ describe("confirmation persistence boundary", () => {
   });
   it("keeps a successful insert closed even if Telegram success delivery fails", async () => {
     const flow = new ProposalFlow();
-    const client = { call: vi.fn().mockResolvedValue(true), sendMessage: vi.fn().mockResolvedValue(undefined) };
+    const client = { call: vi.fn().mockImplementation(async (method: string) => { if (method === 'editMessageText') throw new Error('synthetic edit unavailable'); return true; }), sendMessage: vi.fn().mockResolvedValue(undefined) };
     const repository = { getTransactionReceipt: vi.fn().mockResolvedValue(null), saveTransaction: vi.fn().mockResolvedValue({ id: "synthetic-transaction" }) };
     try {
       await deliverUpdate(flow, client, message("12 tabacco"), config, undefined, repository);
@@ -179,7 +180,7 @@ describe("confirmation persistence boundary", () => {
   });
   it.each(["authentication", "account_missing", "insert", "constraint", "rls"] as const)("retains proposal without false success after %s", async code => {
     const flow = new ProposalFlow();
-    const client = { call: vi.fn().mockResolvedValue(true), sendMessage: vi.fn().mockResolvedValue(undefined) };
+    const client = { call: vi.fn().mockImplementation(async (method: string) => { if (method === 'editMessageText') throw new Error('synthetic edit unavailable'); return true; }), sendMessage: vi.fn().mockResolvedValue(undefined) };
     const repository = { getTransactionReceipt: vi.fn().mockResolvedValue(null), saveTransaction: vi.fn().mockRejectedValue(new PersistenceError(code)) };
     const log = vi.spyOn(console, "error").mockImplementation(() => {});
     try {
@@ -213,7 +214,7 @@ describe("cash UUID persistence", () => {
     ["12,50 da liquidi a isybank spesa", "transfer", accounts[2].id, accounts[1].id, null],
   ])("saves %s only after confirmation, using the resolved UUID", async (text, type, from, to, category) => {
     const flow = new ProposalFlow();
-    const client = { call: vi.fn().mockResolvedValue(true), sendMessage: vi.fn().mockResolvedValue(undefined) };
+    const client = { call: vi.fn().mockImplementation(async (method: string) => { if (method === 'editMessageText') throw new Error('synthetic edit unavailable'); return true; }), sendMessage: vi.fn().mockResolvedValue(undefined) };
     const { repository, insertQuery, client: databaseClient } = setup();
     try {
       await deliverUpdate(flow, client, message(text), config, undefined, repository);
@@ -233,7 +234,7 @@ describe("cash UUID persistence", () => {
 describe("accounting day through Telegram and persistence", () => {
   it.each([["Europe/Rome", "2026-07-10"], ["UTC", "2026-07-09"]])("preserves configured %s date without UTC shifting", async (timeZone, expectedDate) => {
     const flow = new ProposalFlow();
-    const client = { call: vi.fn().mockResolvedValue(true), sendMessage: vi.fn().mockResolvedValue(undefined) };
+    const client = { call: vi.fn().mockImplementation(async (method: string) => { if (method === 'editMessageText') throw new Error('synthetic edit unavailable'); return true; }), sendMessage: vi.fn().mockResolvedValue(undefined) };
     const { repository, client: db } = setup();
     const appConfig = { ...config, messageConfig: { timeZone, defaultAccount: "revolut" as const } };
     vi.useFakeTimers();

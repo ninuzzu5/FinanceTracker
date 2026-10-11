@@ -85,6 +85,8 @@ try {
   await db.exec(cashFixture);
   await db.exec(receipts);
   await db.exec(await read('monetary_integrity_and_eur.sql'));
+  await db.exec(await read('history.sql'));
+  console.log('History SQL passed: stable cursor, tied dates, one transfer row and two-owner RLS; fixtures rolled back.');
   console.log('B2/B3 SQL passed: INSERT/UPDATE, finite amounts/dates, EUR, RLS, preflight/atomic refusal, history unchanged, all three RPC suites rerun.');
   const checks = (fixture.match(/select pg_temp\.(assert_balance|expect_error)/g) ?? []).length;
   console.log(`SQL integration passed: ${checks} balance/error assertions, RLS and migration preservation checks. Fixtures rolled back.`);

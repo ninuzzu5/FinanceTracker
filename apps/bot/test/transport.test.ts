@@ -84,3 +84,13 @@ describe("Telegram transport (mocked only)", () => {
     expect(JSON.parse(fetch.mock.calls[0][1].body)).toEqual({ chat_id: 123456, text: "synthetic reply" });
   });
 });
+
+it.each(['editMessageText','editMessageReplyMarkup'] as const)('treats unchanged %s as a successful no-op', async method => {
+  const fetch = vi.fn().mockResolvedValue(response(400,{ok:false,error_code:400,description:'Bad Request: message is not modified'}));
+  await expect(new TelegramClient('synthetic',{fetch}).call(method,{})).resolves.toBe(true);
+  expect(fetch).toHaveBeenCalledTimes(1);
+});
+it('returns the bot message identity for editing the same UI panel', async () => {
+  const fetch = vi.fn().mockResolvedValue(response(200,{ok:true,result:{message_id:101}}));
+  await expect(new TelegramClient('synthetic',{fetch}).sendMessage(123456,'Menu')).resolves.toBe(101);
+});

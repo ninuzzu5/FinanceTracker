@@ -301,3 +301,105 @@ Dopo aver applicato 006 in un ambiente di test:
 La migrazione non deduplica lo storico o le operazioni della vecchia versione:
 prima dell'aggiornamento controlla i vecchi esiti incerti. Non provare questi
 messaggi nei conti personali reali.
+
+## Menu, storico e anteprime (UX 1–4)
+
+All'avvio del polling il bot registra `/start`, `/menu`, `/movimenti`, `/riconcilia`,
+`/help`, `/cancel` tramite `setMyCommands`, con scope della chat autorizzata. Il
+webhook registra al primo POST autenticato di ciascun processo. Un errore non
+interrompe il bot e non espone il motivo grezzo. Non occorre modificare BotFather.
+Dopo build/riavvio apri la chat privata autorizzata, digita `/` o riapri la chat se
+Telegram mantiene il menu in cache. Il registro è `src/commands.ts`.
+
+Il menu contiene Movimento, Trasferimento, Storico e Contanti. Menu, wizard,
+modifiche di campi e riepilogo usano il message_id restituito da Telegram per
+aggiornare lo stesso pannello. Conferma e annullamento chiudono i pulsanti; la
+ricevuta conservata include i dati del movimento. Un nuovo flusso invalida il
+precedente e prova a rimuoverne i pulsanti. Un fallimento di modifica usa un nuovo
+messaggio; il vecchio stato rimane invalido. Non vengono eliminati messaggi utente
+o ricevute. L'errore Telegram “message is not modified” è un no-op riuscito.
+
+Un importo/data standalone continua a compilare il campo del wizard; un movimento
+completo in testo libero sostituisce il wizard. `/help` normale mostra la guida
+senza interrompere il flusso. Se la fonte della proposta viene modificata in
+`/help`, la proposta viene invece invalidata.
+
+Prima di creare un'anteprima da una fonte Telegram, il percorso di consegna legge
+`get_transaction_receipt` con **la stessa chiave B1**, senza un nuovo sistema di
+deduplicazione persistente. Una fonte già salvata mostra direttamente un avviso,
+anche dopo un riavvio e anche se modificata in un comando. Una lettura fallita
+blocca l'anteprima; una conferma con esito incerto mantiene la chiave B1. Fonti
+non salvate aggiornate in ritardo non possono sostituire una sessione più recente
+nel processo attivo. Due nuovi message_id identici nel contenuto rimangono due
+operazioni distinte.
+
+### Storico reale e paginazione
+
+`/movimenti` legge solo `transactions`, cinque operazioni per pagina, con una
+sesta riga di lookahead. La query usa sessione autenticata, filtro user_id e RLS,
+embedding dei due conti tramite FK esistenti. Ordine: transaction_date DESC,
+id DESC; il cursore contiene data e UUID dell'ultima riga visibile. Nessun conteggio
+completo, download del ledger o offset crescente. L'importo viene richiesto a
+PostgREST come `amount::text` e formattato con BigInt: niente perdita di centesimi
+per valori grandi. Valori storici incompatibili o valute non EUR producono un
+errore sicuro, senza arrotondamenti.
+
+Un trasferimento è una sola riga con origine → destinazione; non ha categoria né
+segno di entrata/uscita. Entrate e uscite mostrano +/− e categoria. Le rettifiche
+Contanti stanno in `account_adjustments` e **non** vengono mescolate allo storico
+delle transazioni o rappresentate come spese/entrate fittizie; lo storico lo
+precisa. Questa task non aggiunge uno storico dedicato delle rettifiche.
+
+Le callback di pagina hanno sessione e revisione; pagine non valide, letture in
+corso, scadenza, nuova operazione o riavvio impediscono navigazioni obsolete.
+Una lettura fallita invita a riaprire `/movimenti`; non permette modifiche,
+eliminazioni o annullamenti retroattivi. Nessuna nuova migrazione richiesta.
+
+### Limiti tecnici
+
+- I pannelli, le bozze e l'ordinamento degli update non salvati sono in memoria.
+  Dopo riavvio le vecchie callback non ricostruiscono bozze: solo quelle B1 con
+  chiave possono leggere una ricevuta. Non è introdotta persistenza delle bozze o
+  coordinamento UX multiistanza; polling unico rimane il percorso supportato.
+- La scadenza ripulisce il messaggio quando viene rilevata da un aggiornamento;
+  nessun nuovo servizio di background. Telegram può rifiutare modifiche di
+  messaggi non disponibili; fallback e invalidazione restano sicuri.
+- B1 non associa ricevute alle transazioni anteriori a 006: non è possibile
+  riconoscere automaticamente una vecchia fonte contabilizzata da quella versione.
+- La paginazione non è uno snapshot congelato tra richieste. Inserimenti recenti
+  non spostano le pagine successive; modifiche manuali retroattive del ledger
+  possono cambiarne il contenuto. Il cursore e il tie-break UUID sono stabili.
+- Nessun indice nuovo: limit e cursore evitano offset/download, ma grandi ledger
+  possono richiedere un futuro indice su user_id/transaction_date/id. Le FK e il
+  supporto PostgREST al cast testuale devono essere quelli della baseline. Il
+  catalogo remoto e Auth reale non sono stati interrogati durante questa task.
+- L'aggiornamento del menu Telegram avviene quando si avvia il bot aggiornato;
+  non è stato eseguito su Telegram durante lo sviluppo. Non sono stati letti token.
+
+### Collaudo manuale dopo il riavvio
+
+1. Digita `/`: devono apparire i sei comandi; `/start` e `/menu` mostrano quattro
+   opzioni. Apri Storico e Contanti dal menu.
+2. `/movimenti`: verifica importi, date/categorie/conti; su più di cinque righe usa
+   Avanti e Indietro. Un trasferimento deve apparire una volta con la freccia.
+3. Movimento → Entrata/Uscita → `12,50` → categoria → conto → oggi; torna indietro,
+   modifica l'importo nell'anteprima e annulla. Il messaggio principale si aggiorna
+   e nessun movimento viene salvato con Annulla.
+4. Trasferimento → `10` → Revolut → Contanti → ieri; conferma una sola volta e
+   riclicca: resta un movimento e una ricevuta leggibile.
+5. Nel wizard scrivi `12 pranzo contanti`: il testo libero sostituisce la
+   compilazione. Fuori dal wizard usa `100 stipendio revolut`.
+6. Prima di confermare `12 pranzo revolut`, modifica la fonte in `13 pranzo
+   contanti`: anteprima aggiornata e vecchi pulsanti invalidi. Modificala invece in
+   `/help`: proposta chiusa.
+7. Su dati di test conferma un movimento e modifica la sua fonte: solo avviso di
+   registrazione, nessuna anteprima. Invia lo stesso testo con un nuovo messaggio:
+   è una nuova operazione legittima. Riavvia e riprova il vecchio pulsante: solo
+   lettura di ricevuta, nessun nuovo salvataggio.
+8. Sostituisci una proposta con `/menu`, prova callback vecchie, `/cancel` e una
+   proposta oltre 30 minuti: nessuna conferma possibile. La pulizia è best effort.
+9. Ripeti `-€12 spesa revolut`, `−€12 spesa revolut`, `- EUR 12 spesa revolut`,
+   `–12 spesa revolut`, `12 da contanti a revolut e isybank`,
+   `20 da revolut a isybank o contanti`: nessuna anteprima confermabile.
+10. `/riconcilia`: prova annullamento e, solo con dati sintetici e apertura
+    configurata, conferma/doppio clic; il giorno chiuso resta protetto.

@@ -15,7 +15,7 @@ const callback = (flow: ProposalFlow, action: string) => {
 const flows: ProposalFlow[] = [];
 const setup = () => {
   const flow = new ProposalFlow(); flows.push(flow);
-  const client = { call: vi.fn().mockResolvedValue(true), sendMessage: vi.fn().mockResolvedValue(undefined) };
+  const client = { call: vi.fn().mockImplementation(async (method: string) => { if (method === 'editMessageText') throw new Error('synthetic edit unavailable'); return true; }), sendMessage: vi.fn().mockResolvedValue(undefined) };
   const transaction = { saveTransaction: vi.fn() };
   const cash = { previewCash: vi.fn().mockResolvedValue({ accountId: 'synthetic-cash', theoretical: '10.29' }), reconcileCash: vi.fn().mockResolvedValue({ id: 'synthetic-receipt', delta: '-0.29', observed: '10.00' }) };
   const deliver = (update: unknown) => deliverUpdate(flow, client, update, config, undefined, transaction, cash);
@@ -38,7 +38,7 @@ describe('Telegram reconciliation', () => {
     expect(s.cash.previewCash).toHaveBeenCalledTimes(1);
     expect(s.cash.reconcileCash).not.toHaveBeenCalled();
     expect(s.transaction.saveTransaction).not.toHaveBeenCalled();
-    expect(s.client.sendMessage.mock.calls.at(-1)?.[1]).toContain('Rettifica: -0.29');
+    expect(s.client.sendMessage.mock.calls.at(-1)?.[1]).toContain('Rettifica: −0,29 €');
     const confirm = callback(s.flow, 'confirm'); await s.deliver(confirm); await s.deliver(confirm);
     expect(s.cash.reconcileCash).toHaveBeenCalledTimes(1);
     expect(s.cash.reconcileCash.mock.calls[0][0]).toMatchObject({ accountId: 'synthetic-cash', expected: '10.29', observed: '10.00', requestId: expect.stringMatching(/^[0-9a-f-]{36}$/) });

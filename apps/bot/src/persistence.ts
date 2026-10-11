@@ -50,9 +50,9 @@ export function persistenceMessage(error: unknown): string {
   if (code === "currency") return "FinanceTracker supporta soltanto conti in EUR. Controlla la valuta del conto: non è stata effettuata alcuna conversione.";
   if (code === "conflict") return "Questa operazione è già stata registrata con valori diversi. Non ho creato un nuovo movimento; recupera la ricevuta dal vecchio pulsante Conferma.";
   if (code === "closed") return "La giornata Contanti è già riconciliata. Il movimento richiede una riapertura, non ancora disponibile.";
-  if (code === "account_missing") return "Bro, il conto richiesto non è disponibile nel database. Controlla i conti prima di riprovare.";
-  if (code === "configuration" || code === "authentication" || code === "session") return "Bro, non riesco ad accedere al database. Controlla la configurazione del bot prima di riprovare.";
-  if (code === "mapping" || code === "constraint") return "Bro, il database non accetta questi dati. Controlla la proposta prima di riprovare.";
-  if (code === "rls") return "Bro, il database non autorizza il salvataggio. Controlla i permessi prima di riprovare.";
+  if (code === "account_missing") return "il conto richiesto non è disponibile nel database. Controlla i conti prima di riprovare.";
+  if (code === "configuration" || code === "authentication" || code === "session") return "non riesco ad accedere al database. Controlla la configurazione del bot prima di riprovare.";
+  if (code === "mapping" || code === "constraint") return "il database non accetta questi dati. Controlla la proposta prima di riprovare.";
+  if (code === "rls") return "il database non autorizza il salvataggio. Controlla i permessi prima di riprovare.";
   return "Esito del salvataggio incerto. Riprova Conferma: mantiene la stessa chiave e recupera una ricevuta già salvata. Annulla chiude solo il flusso.";
 }

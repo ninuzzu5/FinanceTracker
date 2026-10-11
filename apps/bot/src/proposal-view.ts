@@ -1,3 +1,4 @@
+import { euro } from "./money-view.js";
 import { compactOperationKey } from "./operation-key.js";
 import { accountIds, accountLabels, categoryLabels, transactionTypeLabels } from "@finance-tracker/domain";
 import { categoriesFor, type Proposal } from "./proposals.js";
@@ -34,10 +35,10 @@ export function choicesKeyboard(p: Proposal, field: "account" | "fromAccount" | 
   ] };
 }
 
-export function proposalText(p: Proposal, title = "Anteprima aggiornata, bro 👌"): string {
+export function proposalText(p: Proposal, title = "Anteprima aggiornata", receipt = false): string {
   return [
     title, "",
-    `💶 ${p.amount.toLocaleString("it-IT", { style: "currency", currency: "EUR" })}`,
+    `💶 ${euro(p.amount, p.type === "expense" ? "−" : p.type === "income" ? "+" : "")}`,
     ...(p.type === "transfer" ? [
       `Da: ${p.fromAccount === null ? "da confermare" : accountLabels[p.fromAccount]}`,
       `A: ${p.toAccount === null ? "da confermare" : accountLabels[p.toAccount]}`,
@@ -45,6 +46,6 @@ export function proposalText(p: Proposal, title = "Anteprima aggiornata, bro �
     `📅 ${p.date.split("-").reverse().join("/")}`,
     `↔️ Tipo: ${p.type ? transactionTypeLabels[p.type] : "da confermare"}`,
     ...(p.type === "transfer" ? [] : [`🏷️ Categoria: ${p.category ? categoryLabels[p.category] : "da confermare"}`]),
-    "", p.submitted ? "Esito da verificare: il movimento potrebbe essere già salvato. Conferma ritenta la stessa operazione." : "Solo anteprima: Conferma salva o recupera la ricevuta della stessa operazione.",
+    ...(receipt ? [] : ["", p.submitted ? "Esito da verificare: il movimento potrebbe essere già salvato. Conferma ritenta la stessa operazione." : "Solo anteprima: Conferma salva o recupera la ricevuta della stessa operazione."]),
   ].join("\n");
 }

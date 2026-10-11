@@ -1,3 +1,6 @@
+import { euro } from "./money-view.js";
+import { commandName } from "./commands.js";
+import { historyView, type HistoryPage } from "./history.js";
 import { accountIds, parseAmountInput, parseDateInput, transactionTypes, type AccountId, type CategoryId, type TransactionType } from "@finance-tracker/domain";
 import { readMessageConfig } from "./config.js";
 import { decideUpdate, isRecord, updateId, type TelegramConfig } from "./telegram.js";
@@ -11,6 +14,7 @@ import { GuidedEntry } from "./wizard.js";
 export type FlowEffect =
   | { kind: "send"; chatId: number; text: string; keyboard?: InlineKeyboard }
   | { kind: "answer"; queryId: string; text: string }
+  | { kind: "loadHistory"; chatId: number; stateId: string; revision: number }
   | { kind: "recoverMovement"; chatId: number; requestId: string }
   | { kind: "persist"; chatId: number; messageId: number; proposal: Proposal }
   | { kind: "loadCash"; chatId: number; stateId: string; date: string }
@@ -22,30 +26,40 @@ const send = (chatId: number, text: string, keyboard?: InlineKeyboard): FlowEffe
 const preview = (chatId: number, p: Proposal, title?: string) => send(chatId, proposalText(p, title), proposalKeyboard(p));
 
 export class ProposalFlow {
+  readonly panels = new Map<number, { messageId: number; token: string }>();
+  latestSourceId = 0;
+  readonly sourceVersions = new Map<number, number>();
   private readonly guided: GuidedEntry;
   private readonly saving = new Set<number>();
   constructor(readonly store = new ProposalStore()) { this.guided = new GuidedEntry(store); }
+
+  isSaving(chatId: number): boolean { return this.saving.has(chatId); }
 
   handle(update: unknown, config: TelegramConfig, now = new Date()): FlowEffect[] {
     if (!isRecord(update) || updateId(update) === undefined) return [];
     if ("callback_query" in update) return this.callback(update.callback_query, config, now);
     const decision = decideUpdate(update, config, now);
     if (decision.kind === "ignore") return [];
-    if (this.saving.has(decision.chatId)) return [send(decision.chatId, "Salvataggio in corso, bro. Aspetta la conferma.")];
+    if (this.saving.has(decision.chatId)) return [send(decision.chatId, "Salvataggio in corso. Aspetta la conferma.")];
     const message = (update.message ?? update.edited_message) as { message_id: number; text: string };
     const pendingProposal = this.store.get(decision.chatId);
     if (pendingProposal?.submitted && "edited_message" in update && pendingProposal.sourceMessageId === message.message_id)
       return [send(decision.chatId, "Il salvataggio è già stato tentato. Usa Conferma per recuperare la stessa operazione; non modificare la fonte finché l’esito è incerto.")];
-    const command = /^\/(start|menu|cancel|riconcilia)(?:@niuzzu_bot)?(?:\s|$)/i.exec(message.text.trim());
+    const command = commandName(message.text);
     if (command) {
-      if (command[1].toLowerCase() === "riconcilia") return [send(decision.chatId, ...this.cashViewArgs(decision.chatId, true))];
-      if (command[1].toLowerCase() !== "cancel") return this.guided.menu(decision.chatId, message.message_id);
+      if (command === "help") {
+        if ("edited_message" in update && pendingProposal?.sourceMessageId === message.message_id) this.store.remove(decision.chatId);
+        return [send(decision.chatId, decision.kind === "help" ? decision.reply : "Usa /menu per iniziare.")];
+      }
+      if (command === "movimenti") return this.openHistory(decision.chatId);
+      if (command === "riconcilia") return [send(decision.chatId, ...this.cashViewArgs(decision.chatId, true))];
+      if (command !== "cancel") return this.guided.menu(decision.chatId, message.message_id);
       const wasUncertainMovement = this.store.get(decision.chatId)?.submitted;
       const wasUncertain = this.store.getState(decision.chatId)?.kind === "reconciliation" && (this.store.getState(decision.chatId) as { step?: string }).step === "uncertain";
       this.store.remove(decision.chatId);
       if (wasUncertainMovement) return [send(decision.chatId, "Flusso chiuso: non ho annullato eventuali movimenti già salvati. Il vecchio pulsante Conferma può recuperare la ricevuta.")];
       if (wasUncertain) return [send(decision.chatId, "Flusso chiuso. L'esito resta incerto: non ho annullato eventuali rettifiche nel database.")];
-      return [send(decision.chatId, "❌ Flusso annullato, bro. Scrivimi un movimento oppure usa /menu.")];
+      return [send(decision.chatId, "❌ Flusso annullato. Scrivimi un movimento oppure usa /menu.")];
     }
     if (decision.kind === "help") return [send(decision.chatId, decision.reply)];
     const cash = this.store.getState(decision.chatId);
@@ -59,7 +73,9 @@ export class ProposalFlow {
       const view = reconciliationView(cash);
       return [send(decision.chatId, view.text, view.keyboard)];
     }
-    const wizardReply = this.guided.text(decision.chatId, message.text, config, now);
+    // A complete free-text operation can replace a wizard; a standalone field stays in it.
+    const wizardReply = decision.kind === 'preview' && parseAmountInput(message.text) === null && this.store.getState(decision.chatId)?.kind === 'wizard'
+      ? null : this.guided.text(decision.chatId, message.text, config, now);
     if (wizardReply) return wizardReply;
     const p = this.store.get(decision.chatId);
     // Text replies edit a field; Telegram edits of the source message reparse the proposal.
@@ -67,8 +83,8 @@ export class ProposalFlow {
       const value = p.editing === "amount" ? parseAmountInput(message.text)
         : parseDateInput(message.text, now, (config.messageConfig ?? readMessageConfig()).timeZone);
       if (value === null) return [send(decision.chatId,
-        p.editing === "amount" ? "Importo non valido, bro. Scrivi solo il valore, per esempio 12,50."
-          : "Data non valida, bro. Scrivi una data, per esempio 18/09/2026 oppure ieri.", backKeyboard(p))];
+        p.editing === "amount" ? "Importo non valido. Scrivi solo il valore, per esempio 12,50."
+          : "Data non valida. Scrivi una data, per esempio 18/09/2026 oppure ieri.", backKeyboard(p))];
       if (p.editing === "amount") p.amount = value as number;
       else p.date = value as string;
       p.editing = null;
@@ -85,8 +101,25 @@ export class ProposalFlow {
     const proposal = this.store.create(decision.chatId, message.message_id, transaction.type === "transfer"
       ? { amount, date, type: "transfer", fromAccount: transaction.fromAccount, toAccount: transaction.toAccount }
       : { amount, date, account: transaction.account, type: transaction.type, category: transaction.category });
-    const title = "edited_message" in update ? "Anteprima aggiornata, bro 👌" : "Ci sono, bro 👌";
+    const title = "edited_message" in update ? "Anteprima aggiornata" : "Anteprima movimento";
     return [preview(decision.chatId, proposal, p ? `${title}\nQuesta proposta sostituisce la precedente.` : title)];
+  }
+
+  private openHistory(chatId: number): FlowEffect[] {
+    const state = this.store.startHistory(chatId);
+    return [{kind:'loadHistory',chatId,stateId:state.id,revision:state.revision}];
+  }
+
+  completeHistory(effect: Extract<FlowEffect, {kind:'loadHistory'}>, page?: HistoryPage): FlowEffect[] {
+    const state = this.store.getState(effect.chatId);
+    if (state?.kind !== 'history' || state.id !== effect.stateId || state.revision !== effect.revision) return [];
+    if (!page || (state.page > 0 && page.rows.length === 0)) {
+      this.store.remove(effect.chatId);
+      return [send(effect.chatId, 'Storico non disponibile o pagina non più valida. Riapri /movimenti e riprova.')];
+    }
+    state.next = page.next; state.loading = false;
+    const view = historyView(state,page);
+    return [send(effect.chatId,view.text,view.keyboard)];
   }
 
   private cashViewArgs(chatId: number, start = false): [string, InlineKeyboard] {
@@ -121,7 +154,7 @@ export class ProposalFlow {
       return [send(effect.chatId, reconciliationMessage(error))];
     }
     if (state?.kind === "reconciliation" && state.id === effect.stateId) this.store.remove(effect.chatId);
-    return [{ kind: "clearButtons", chatId: effect.chatId, messageId: effect.messageId }, send(effect.chatId, `✅ Contanti riconciliati al ${effect.request.date}. Rettifica: ${result.delta} €. Saldo dichiarato: ${result.observed} €. Giornata chiusa.`)];
+    return [{ kind: "clearButtons", chatId: effect.chatId, messageId: effect.messageId }, send(effect.chatId, `✅ Contanti riconciliati al ${effect.request.date}. Rettifica: ${euro(result.delta)}. Saldo dichiarato: ${euro(result.observed)}. Giornata chiusa.`)];
   }
 
   completeSave(effect: Extract<FlowEffect, { kind: "persist" }>, error?: unknown): FlowEffect[] {
@@ -140,7 +173,7 @@ export class ProposalFlow {
     }
     this.store.remove(effect.chatId);
     return [{ kind: "clearButtons", chatId: effect.chatId, messageId: effect.messageId },
-      send(effect.chatId, "✅ Transazione registrata, bro. Salvata nel database.")];
+      send(effect.chatId, proposalText(effect.proposal, "✅ Transazione registrata", true))];
   }
 
   private callback(query: unknown, config: TelegramConfig, now: Date): FlowEffect[] {
@@ -152,6 +185,23 @@ export class ProposalFlow {
         String(query.from.id) !== config.allowedChatId || !Number.isSafeInteger(chat.id)) return [];
     const chatId = chat.id as number;
     if (this.saving.has(chatId)) return [{ kind: "answer", queryId: query.id, text: "Salvataggio in corso." }];
+    if (query.data.startsWith('h:')) {
+      const state = this.store.getState(chatId);
+      const match = /^h:([a-f0-9]{16}):(\d+):(back|next|menu)$/.exec(query.data);
+      const answer = (text = ''): FlowEffect => ({kind:'answer',queryId:query.id as string,text});
+      if (!match || state?.kind !== 'history' || state.id !== match[1] || state.revision !== Number(match[2]) || state.loading) return [answer(stale)];
+      if (match[3] === 'menu') return [answer(), ...this.guided.menu(chatId)];
+      if (match[3] === 'back' && state.page > 0) state.page--;
+      else if (match[3] === 'next' && state.next) { state.cursors[++state.page] = state.next; }
+      else return [answer('Pagina non valida.')];
+      state.revision++; state.loading = true;
+      return [answer(), {kind:'loadHistory',chatId,stateId:state.id,revision:state.revision}];
+    }
+    if (query.data.startsWith('m:')) {
+      const state = this.store.getState(chatId);
+      const match = /^m:([a-f0-9]{16}):(history|cash)$/.exec(query.data);
+      if (match && state?.kind === 'menu' && state.id === match[1]) return [{kind:'answer',queryId:query.id,text:''}, ...(match[2] === 'history' ? this.openHistory(chatId) : [send(chatId,...this.cashViewArgs(chatId,true))])];
+    }
     if (query.data.startsWith("r:")) {
       const state = this.store.getState(chatId);
       const match = /^r:([a-f0-9]{16}):(\d+):(today|yesterday|confirm|edit|cancel)$/.exec(query.data);
@@ -213,7 +263,7 @@ export class ProposalFlow {
       return [
         ...answer("Annullata."),
         { kind: "clearButtons", chatId, messageId: query.message.message_id as number },
-        send(chatId, p.submitted ? "Flusso chiuso; eventuali movimenti già salvati non sono annullati. Il vecchio pulsante Conferma può recuperare la ricevuta." : "❌ Proposta annullata, bro."),
+        send(chatId, p.submitted ? "Flusso chiuso; eventuali movimenti già salvati non sono annullati. Il vecchio pulsante Conferma può recuperare la ricevuta." : "❌ Proposta annullata."),
       ];
     }
     if (action === "swap") {
@@ -226,7 +276,7 @@ export class ProposalFlow {
     if (action === "edit" || action === "back") {
       p.editing = null;
       p.revision++;
-      return [...answer(""), action === "back" ? preview(chatId, p) : send(chatId, "Cosa cambiamo, bro?", fieldKeyboard(p))];
+      return [...answer(""), action === "back" ? preview(chatId, p) : send(chatId, "Quale campo vuoi modificare?", fieldKeyboard(p))];
     }
     const [verb, field, value] = action.split(".");
     if (verb === "field" && ["amount", "date", "account", "fromAccount", "toAccount", "type", "category"].includes(field)) {
@@ -237,8 +287,8 @@ export class ProposalFlow {
       p.revision++;
       p.editing = field === "amount" || field === "date" ? field : null;
       return [...answer(""), p.editing
-        ? send(chatId, field === "amount" ? "Scrivi il nuovo importo, bro: per esempio 12,50."
-          : "Scrivi la nuova data, bro: per esempio 18/09/2026 oppure ieri.", backKeyboard(p))
+        ? send(chatId, field === "amount" ? "Scrivi il nuovo importo: per esempio 12,50."
+          : "Scrivi la nuova data: per esempio 18/09/2026 oppure ieri.", backKeyboard(p))
         : send(chatId, "Scegli il nuovo valore:", choicesKeyboard(p, field as "account" | "fromAccount" | "toAccount" | "type" | "category"))];
     }
     if (verb === "set") {

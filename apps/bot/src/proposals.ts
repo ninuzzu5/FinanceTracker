@@ -1,3 +1,4 @@
+import type { HistoryState } from "./history.js";
 import { randomBytes, randomUUID } from "node:crypto";
 import { expenseCategoryIds, incomeCategoryIds, type CategoryId, type TransactionType, type TransactionDraft } from "@finance-tracker/domain";
 import { sourceOperationKey } from "./operation-key.js";
@@ -21,7 +22,7 @@ export function categoriesFor(type: TransactionType | null): readonly CategoryId
   return type === "expense" ? expenseCategoryIds : type === "income" ? incomeCategoryIds : [];
 }
 
-export type ConversationState = { kind: "proposal"; proposal: Proposal } | WizardState | MenuState | ReconciliationState;
+export type ConversationState = { kind: "proposal"; proposal: Proposal } | WizardState | MenuState | ReconciliationState | HistoryState;
 
 /** One active menu, wizard or proposal per chat; a shared expiry and no raw messages. */
 export class ProposalStore {
@@ -48,6 +49,12 @@ export class ProposalStore {
 
   openMenu(chatId: number, sourceMessageId?: number): MenuState {
     const state: MenuState = { kind: "menu", id: randomBytes(8).toString("hex"), requestId: sourceMessageId === undefined ? randomUUID() : sourceOperationKey(chatId, sourceMessageId) };
+    this.put(chatId, state);
+    return state;
+  }
+
+  startHistory(chatId: number): HistoryState {
+    const state: HistoryState = { kind: 'history', id: randomBytes(8).toString('hex'), revision: 0, page: 0, cursors: [null], next: null, loading: true };
     this.put(chatId, state);
     return state;
   }

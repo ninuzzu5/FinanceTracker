@@ -36,7 +36,7 @@ afterEach(() => { flow.store.clear(); vi.useRealTimers(); });
 
 describe("guided entry and menu", () => {
   it.each(["/start", "/menu", "/start@niuzzu_bot"])("opens the minimal menu with %s", (command) => {
-    expect(labels(text(command))).toEqual(["➕ Nuovo movimento", "💸 Trasferimento"]);
+    expect(labels(text(command))).toEqual(["➕ Movimento", "🔄 Trasferimento", "📋 Storico", "💵 Contanti"]);
     expect(flow.store.getState(chatId)?.kind).toBe("menu");
   });
 
@@ -67,7 +67,7 @@ describe("guided entry and menu", () => {
 
   it("keeps invalid amounts and dates at the same step", () => {
     start(); click("type.expense");
-    for (const value of ["zero", "-12", "12 pizza", "-€12", "−€12", "- EUR 12", "–12", "€ − 12", "－ € 12"]) {
+    for (const value of ["zero", "-12", "-€12", "−€12", "- EUR 12", "–12", "€ − 12", "－ € 12"]) {
       expect(sent(text(value))[0].text).toContain("Importo non valido");
       expect(flow.store.getState(chatId)).toMatchObject({ step: "amount", values: { amount: null } });
     }

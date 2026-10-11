@@ -89,10 +89,9 @@ async function botReceiptIntegration(connection,user) {
     await Promise.all([deliverUpdate(flow,client,button(flow),config,undefined,repository),deliverUpdate(flow,client,button(flow),config,undefined,repository)]);
     assert.equal(await count(),before+1);
     await deliverUpdate(restarted,client,original,config,undefined,repository);
-    assert.equal(restarted.store.get(123456).requestId,key);
-    await deliverUpdate(restarted,client,button(restarted),config,undefined,repository);assert.equal(await count(),before+1);
+    assert.equal(restarted.store.get(123456),undefined);assert.equal(await count(),before+1);
     await deliverUpdate(restarted,client,{update_id:10003,edited_message:{...original.message,text:'13 tabacco revolut 2026-09-02'}},config,undefined,repository);
-    await deliverUpdate(restarted,client,button(restarted),config,undefined,repository);assert.equal(await count(),before+1);
+    assert.equal(restarted.store.get(123456),undefined);assert.equal(await count(),before+1);
     await deliverUpdate(restarted,client,{...original,update_id:10004,message:{...original.message,message_id:10004}},config,undefined,repository);
     assert.notEqual(restarted.store.get(123456).requestId,key);
     await deliverUpdate(restarted,client,button(restarted),config,undefined,repository);assert.equal(await count(),before+2);

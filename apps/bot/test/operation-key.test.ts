@@ -69,13 +69,14 @@ describe("B1 operation identities",()=>{
    vi.spyOn(console,"error").mockImplementation(()=>{});
    const flow=new ProposalFlow();flows.push(flow);
    const client={call:vi.fn().mockResolvedValue(true),sendMessage:vi.fn().mockResolvedValue(undefined)};
-   const repo={getTransactionReceipt:vi.fn().mockResolvedValue({id:"saved"}),saveTransaction:vi.fn().mockRejectedValue(new Error("synthetic timeout"))};
+   const repo={getTransactionReceipt:vi.fn().mockResolvedValue(null),saveTransaction:vi.fn().mockRejectedValue(new Error("synthetic timeout"))};
    await deliverUpdate(flow,client,text("12 tabacco"),config,undefined,repo);const p=flow.store.get(chat)!;const old=callback(flow,"confirm");
    await deliverUpdate(flow,client,old,config,undefined,repo);expect(p.submitted).toBe(true);
    await deliverUpdate(flow,client,callback(flow,"field.amount"),config,undefined,repo);
    await deliverUpdate(flow,client,{update_id:2,edited_message:text("13 tabacco").message},config,undefined,repo);
    expect(flow.store.get(chat)?.amount).toBe(12);expect(flow.store.get(chat)?.requestId).toBe(p.requestId);
    await deliverUpdate(flow,client,text("14 tabacco",3),config,undefined,repo);const fresh=flow.store.get(chat)!;
+   repo.getTransactionReceipt.mockResolvedValueOnce({id:"saved"} as never);
    await deliverUpdate(flow,client,old,config,undefined,repo);expect(flow.store.get(chat)).toBe(fresh);expect(repo.saveTransaction).toHaveBeenCalledTimes(1);
  });
  it("unauthorized callbacks cannot recover receipts",()=>{

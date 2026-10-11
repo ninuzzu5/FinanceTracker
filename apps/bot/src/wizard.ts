@@ -40,7 +40,7 @@ export class GuidedEntry {
       w.values.date = date;
       return this.complete(chatId, w);
     }
-    return show(chatId, w, "Qui scegli un pulsante, bro. Per uscire usa /cancel o /menu.");
+    return show(chatId, w, "Qui scegli un pulsante. Per uscire usa /cancel o /menu.");
   }
 
   callback(chatId: number, queryId: string, data: string, config: TelegramConfig, now: Date): FlowEffect[] {
@@ -58,7 +58,7 @@ export class GuidedEntry {
     const action = match[3];
     if (action === "cancel") {
       this.store.remove(chatId);
-      return [answer("Annullato."), { kind: "send", chatId, text: "❌ Compilazione annullata, bro. Scrivimi un movimento oppure usa /menu." }];
+      return [answer("Annullato."), { kind: "send", chatId, text: "❌ Compilazione annullata. Scrivimi un movimento oppure usa /menu." }];
     }
     if (action === "back") {
       const previous = w.history.pop();
@@ -108,6 +108,6 @@ export class GuidedEntry {
       draft = { amount: v.amount, date: v.date, type: v.type, account: v.account, category: v.category };
     }
     const p = this.store.create(chatId, null, draft, w.requestId);
-    return [{ kind: "send", chatId, text: proposalText(p, "Ecco il movimento, bro 👌"), keyboard: proposalKeyboard(p) }];
+    return [{ kind: "send", chatId, text: proposalText(p, "Ecco il movimento 👌"), keyboard: proposalKeyboard(p) }];
   }
 }

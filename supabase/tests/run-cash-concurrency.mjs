@@ -42,6 +42,8 @@ try {
   await admin.query(await read('cash_reconciliation.sql'));
   await admin.query(await read('transaction_idempotency.sql'));
   await admin.query(await read('monetary_integrity_and_eur.sql'));
+  await admin.query(await read('history.sql'));
+  console.log('History SQL passed: stable cursor, tied dates, one transfer row and two-owner RLS; fixtures rolled back.');
   await admin.query(`insert into auth.users values ('${user}');
     insert into public.accounts(id,user_id,name,type,opening_balance,opening_date) values
     ('${cash}','${user}','Contanti','cash',100,'2026-01-01'),('${bank}','${user}','Revolut','bank',100,'2026-01-01');`);

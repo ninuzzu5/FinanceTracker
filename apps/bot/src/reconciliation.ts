@@ -1,3 +1,4 @@
+import { euro } from "./money-view.js";
 import { normalizeText, parseAmountInput, amountInCents } from '@finance-tracker/domain';
 import type { InlineKeyboard } from './proposal-view.js';
 
@@ -51,11 +52,11 @@ export function reconciliationView(state: ReconciliationState): { text: string; 
     keyboard: { inline_keyboard: [[button('Contanti · Oggi, fine giornata', 'today')], [button('Contanti · Ieri, fine giornata', 'yesterday')], [cancel]] },
   };
   if (state.step === 'amount') return {
-    text: `Contanti · fine giornata ${state.date}\nSaldo teorico: ${state.theoretical} €\nScrivi il denaro realmente disponibile, anche 0.`,
+    text: `Contanti · fine giornata ${state.date}\nSaldo teorico: ${euro(state.theoretical!)}\nScrivi il denaro realmente disponibile, anche 0.`,
     keyboard: { inline_keyboard: [[cancel]] },
   };
   return {
-    text: `Riconciliazione Contanti · fine giornata ${state.date}\nSaldo teorico: ${state.theoretical} €\nSaldo dichiarato: ${state.observed} €\nRettifica: ${centsDecimal(decimalCents(state.observed!) - decimalCents(state.theoretical!))} €\nNon è una spesa o entrata. Confermando chiudi questa giornata e quelle precedenti.`,
+    text: `Riconciliazione Contanti · fine giornata ${state.date}\nSaldo teorico: ${euro(state.theoretical!)}\nSaldo dichiarato: ${euro(state.observed!)}\nRettifica: ${euro(centsDecimal(decimalCents(state.observed!) - decimalCents(state.theoretical!)))}\nNon è una spesa o entrata. Confermando chiudi questa giornata e quelle precedenti.`,
     keyboard: { inline_keyboard: [[button(state.step === 'uncertain' ? '🔄 Riprova stessa richiesta' : '✅ Conferma', 'confirm')], ...(state.step === 'preview' ? [[button('✏️ Cambia saldo', 'edit')]] : []), [cancel]] },
   };
 }
