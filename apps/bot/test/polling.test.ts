@@ -1,4 +1,4 @@
-vi.mock("../src/supabase.js", () => ({ supabaseRepository: { saveTransaction: vi.fn().mockResolvedValue({ id: "synthetic-row" }) } }));
+vi.mock("../src/supabase.js", () => ({ supabaseRepository: { getTransactionReceipt: vi.fn().mockResolvedValue(null), saveTransaction: vi.fn().mockResolvedValue({ id: "synthetic-row" }) } }));
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { runPolling } from "../src/polling.js";
 
@@ -26,8 +26,8 @@ describe("polling", () => {
       sendMessage: vi.fn(async (..._args: unknown[]) => {}),
     };
     await runPolling(client, config, controller.signal, { sleep: async () => { if (polls === 2) controller.abort(); } });
-    expect(client.sendMessage).toHaveBeenCalledTimes(2);
-    expect(client.sendMessage.mock.calls[1][1]).toContain("Transazione registrata");
+    expect(client.sendMessage).toHaveBeenCalledTimes(1);
+    expect(client.call).toHaveBeenCalledWith("editMessageText", expect.objectContaining({text:expect.stringContaining("Transazione registrata")}),controller.signal);
     expect(client.call).toHaveBeenCalledWith("answerCallbackQuery", expect.objectContaining({ callback_query_id: "synthetic-callback" }), controller.signal);
   });
   it("processes edits with the same message_id and a new update_id, then advances offset", async () => {
@@ -38,7 +38,7 @@ describe("polling", () => {
     original.message.text = "mercoledì barbiere 34€";
     const edited = { update_id: 21, edited_message: { ...original.message, text: "mercoledì barbiere 34€ isybank" } };
     const client = {
-      call: vi.fn().mockResolvedValueOnce({ url: "" }).mockResolvedValueOnce([original])
+      call: vi.fn().mockResolvedValueOnce({ url: "" }).mockResolvedValueOnce(true).mockResolvedValueOnce([original])
         .mockResolvedValueOnce([edited, edited]).mockResolvedValueOnce([]),
       sendMessage: vi.fn().mockResolvedValue(undefined),
     };
@@ -49,19 +49,19 @@ describe("polling", () => {
     expect(client.sendMessage.mock.calls[1][1]).toContain("Isybank");
     expect(client.sendMessage.mock.calls[1][1]).toContain("16/09/2026");
     expect(client.sendMessage.mock.calls[1][1]).toContain("Anteprima aggiornata");
-    expect(client.call.mock.calls.slice(1).map(([, body]) => body.offset)).toEqual([0, 21, 22]);
+    expect(client.call.mock.calls.filter(([method]) => method === "getUpdates").map(([, body]) => body.offset)).toEqual([0, 21, 22]);
   });
   it("advances offsets for processed and ignored updates and skips duplicates in this session", async () => {
     const controller = new AbortController();
     const client = {
-      call: vi.fn().mockResolvedValueOnce({ url: "" })
+      call: vi.fn().mockResolvedValueOnce({ url: "" }).mockResolvedValueOnce(true)
         .mockResolvedValueOnce([null, update(10), update(10), update(11, 999), { update_id: 12, edited_message: {} }])
         .mockResolvedValueOnce([update(10), { update_id: 13, message: { text: 123 } }, update(14)]),
       sendMessage: vi.fn().mockResolvedValue(undefined),
     };
     let cycles = 0;
     await runPolling(client, config, controller.signal, { sleep: async () => { if (++cycles === 2) controller.abort(); } });
-    expect(client.call.mock.calls).toEqual([
+    expect(client.call.mock.calls.filter(([method]) => method !== "setMyCommands")).toEqual([
       ["getWebhookInfo", {}, controller.signal],
       ["getUpdates", { offset: 0, timeout: 30, allowed_updates: ["message", "edited_message", "callback_query"] }, controller.signal],
       ["getUpdates", { offset: 13, timeout: 30, allowed_updates: ["message", "edited_message", "callback_query"] }, controller.signal],
@@ -83,22 +83,34 @@ describe("polling", () => {
   });
 
   it("does not acknowledge an update whose reply failed", async () => {
-    const client = { call: vi.fn().mockResolvedValueOnce({ url: "" }).mockResolvedValueOnce([update(7)]), sendMessage: vi.fn().mockRejectedValue(new Error("safe error")) };
+    const client = { call: vi.fn().mockResolvedValueOnce({ url: "" }).mockResolvedValueOnce(true).mockResolvedValueOnce([update(7)]), sendMessage: vi.fn().mockRejectedValue(new Error("safe error")) };
     await expect(runPolling(client, config, new AbortController().signal)).rejects.toThrow("safe error");
-    expect(client.call).toHaveBeenCalledTimes(2);
+    expect(client.call).toHaveBeenCalledTimes(3);
   });
 
   it("rejects invalid update batches", async () => {
-    const client = { call: vi.fn().mockResolvedValueOnce({ url: "" }).mockResolvedValueOnce({}), sendMessage: vi.fn() };
+    const client = { call: vi.fn().mockResolvedValueOnce({ url: "" }).mockResolvedValueOnce(true).mockResolvedValueOnce({}), sendMessage: vi.fn() };
     await expect(runPolling(client, config, new AbortController().signal)).rejects.toThrow("non valido");
   });
 
   it("paces empty responses and supports shutdown", async () => {
     const controller = new AbortController();
-    const client = { call: vi.fn().mockResolvedValueOnce({ url: "" }).mockResolvedValueOnce([]), sendMessage: vi.fn() };
+    const client = { call: vi.fn().mockResolvedValueOnce({ url: "" }).mockResolvedValueOnce(true).mockResolvedValueOnce([]), sendMessage: vi.fn() };
     const sleep = vi.fn(async () => { controller.abort(); });
     await runPolling(client, config, controller.signal, { sleep });
     expect(sleep).toHaveBeenCalledWith(250, controller.signal);
     expect(client.sendMessage).not.toHaveBeenCalled();
   });
+});
+
+it('continues polling if command registration fails without logging private errors', async () => {
+  const controller=new AbortController();const ready=vi.fn();const warn=vi.spyOn(console,'warn').mockImplementation(()=>{});
+  const client={call:vi.fn(async (method:string)=>{
+    if(method==='getWebhookInfo')return {url:''};
+    if(method==='setMyCommands')throw new Error('private token');
+    return [];
+  }),sendMessage:vi.fn()};
+  await runPolling(client,config,controller.signal,{onReady:ready,sleep:async()=>controller.abort()});
+  expect(ready).toHaveBeenCalledOnce();expect(client.call).toHaveBeenCalledWith('getUpdates',expect.anything(),controller.signal);
+  expect(warn.mock.calls.flat().join('')).not.toContain('private token');
 });

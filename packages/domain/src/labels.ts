@@ -1,5 +1,5 @@
 import type { CategoryId } from "./categories.js";
-import type { TransactionType } from "./types.js";
+import type { AccountId, TransactionType } from "./types.js";
 
 export const categoryLabels: Record<CategoryId, string> = {
   groceries: "Spesa", public_transport: "Mezzi di trasporto", flights: "Voli",
@@ -11,4 +11,8 @@ export const categoryLabels: Record<CategoryId, string> = {
 
 export const transactionTypeLabels: Record<TransactionType, string> = {
   expense: "Uscita", income: "Entrata", transfer: "Trasferimento",
+};
+
+export const accountLabels: Record<AccountId, string> = {
+  revolut: "Revolut", isybank: "Isybank", contanti: "Contanti",
 };

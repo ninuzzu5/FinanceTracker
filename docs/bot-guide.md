@@ -5,7 +5,7 @@ Dalla root del progetto, configura privatamente `.env.local`. Se il file esiste 
 - `TELEGRAM_BOT_TOKEN`: token fornito da BotFather (obbligatorio).
 - `TELEGRAM_ALLOWED_CHAT_ID`: ID numerico positivo della tua chat privata (obbligatorio).
 - `APP_TIMEZONE`: fuso orario, predefinito `Europe/Rome`.
-- `DEFAULT_ACCOUNT`: `revolut` (predefinito) oppure `isybank`.
+- `DEFAULT_ACCOUNT`: `revolut` (predefinito), `isybank` oppure `contanti`.
 
 Il programma carica `.env.local` a runtime tramite `process.loadEnvFile`, nativo di Node.js 22+. Le variabili già presenti nell'ambiente della shell hanno precedenza. Il file è escluso da Git: non pubblicare token, ID o contenuto del file. Per il polling non servono webhook secret o hosting. Per salvare servono le quattro variabili Supabase indicate sotto; vengono validate al primo salvataggio. La validazione locale controlla formato e presenza delle impostazioni; Telegram verifica il token alla prima richiesta.
 
@@ -54,7 +54,7 @@ Il testo libero continua a funzionare senza `/start`, anche quando è visualizza
 
 **Nuovo movimento:** Spesa/Entrata → importo testuale → categoria → conto → data → anteprima standard. Le categorie sono quelle del dominio, filtrate per tipo; per le entrate sono Stipendio, Regali e Progetti personali. L'importo riusa il parser esistente (`12`, `12,50`, `12.50`); un valore non valido lascia attivo lo stesso passaggio.
 
-**Trasferimento:** importo → origine → destinazione → data → anteprima standard, senza categoria. I conti sono Revolut e Isybank. La destinazione esclude il conto di origine; anche una callback manipolata con conti uguali viene rifiutata.
+**Trasferimento:** importo → origine → destinazione → data → anteprima standard, senza categoria. I conti sono Revolut, Isybank e Contanti. La destinazione esclude il conto di origine; anche una callback manipolata con conti uguali viene rifiutata.
 
 La data offre **Oggi**, **Ieri**, **📅 Altra data**. Quest'ultima richiede una data testuale della grammatica seguente, validata in `APP_TIMEZONE`; una data non valida non viene sostituita con oggi. **⬅️ Indietro** torna al passaggio precedente conservando i valori; cambiando tipo viene azzerata una categoria incompatibile e cambiando origine viene azzerata una destinazione che diventerebbe uguale. I passaggi successivi vanno comunque riconfermati. **❌ Annulla** elimina la compilazione.
 
@@ -101,7 +101,7 @@ Senza anno si usa sempre l'anno del riferimento: `31/12` a settembre significa d
 
 Una data riconosciuta ma impossibile (`31/02/2026`) o più espressioni di data (`oggi ieri`, anche `mercoledì 16 settembre 2026`) richiedono chiarimento: **non vengono sostituite con oggi**. Le espressioni fuori grammatica non sono interpretate come date; per esempio `domani` non è supportato e rimane testo descrittivo. Se vuoi una data diversa, usa un formato della tabella.
 
-**Conto:** `revolut`, `isybank`, `isy`, `isy bank`, senza distinzione maiuscole/minuscole. Per entrate e spese un conto esplicito prevale su `DEFAULT_ACCOUNT`; in sua assenza si usa il default configurato. Se compaiono entrambi i conti senza una direzione di trasferimento, il bot chiede un solo conto. I nomi devono essere parole intere, non parti di altre parole.
+**Conto:** `revolut`, `isybank`, `isy`, `isy bank`, `contanti`, `cash`, `in contanti`, `liquidi`, senza distinzione maiuscole/minuscole. Per entrate e spese un conto esplicito prevale su `DEFAULT_ACCOUNT`; in sua assenza si usa il default configurato. Se compaiono più conti distinti senza una direzione di trasferimento, il bot chiede un solo conto. I nomi devono essere parole intere, non parti di altre parole.
 
 ### Trasferimenti tra conti personali
 
@@ -117,7 +117,7 @@ Le regole esistenti di importo e data continuano a valere. La direzione viene ri
 
 La proposta usa l'unione discriminata `TransactionDraft`: entrate/spese (o tipo ancora sconosciuto) hanno `account` e `category`; `transfer` ha esclusivamente `fromAccount` e `toAccount`, oltre a importo e data. Non contiene `account` o `category`. Il metadato di classificazione mantiene `category: null` per compatibilità con il contratto del classificatore, senza assegnare una categoria al trasferimento.
 
-L'anteprima di un trasferimento mostra importo, data, Tipo: Trasferimento, Da e A, senza riga Categoria. Il menu Modifica offre importo, data, conto di origine, conto di destinazione e tipo. Sono selezionabili soltanto Revolut e Isybank; una scelta che renderebbe i conti uguali viene rifiutata. **Scambia conti** inverte atomicamente una coppia completa: utile perché con due soli conti non è possibile invertirli uno alla volta senza renderli temporaneamente uguali.
+L'anteprima di un trasferimento mostra importo, data, Tipo: Trasferimento, Da e A, senza riga Categoria. Il menu Modifica offre importo, data, conto di origine, conto di destinazione e tipo. Sono selezionabili Revolut, Isybank e Contanti; una scelta che renderebbe i conti uguali viene rifiutata. **Scambia conti** inverte atomicamente una coppia completa: utile per invertire direttamente la direzione senza scegliere un conto intermedio.
 
 Passando da entrata/spesa a trasferimento, `account` e `category` vengono eliminati e origine/destinazione partono entrambe da confermare. Occorre sceglierle esplicitamente, diverse tra loro. Tornando a entrata/spesa, `fromAccount` e `toAccount` vengono eliminati e si devono selezionare nuovamente conto e categoria. Nessun campo incompatibile viene mantenuto. Conferma rimane bloccata finché i campi necessari non sono completi.
 
@@ -197,7 +197,7 @@ Aggiungi privatamente a `.env.local`:
 - `SUPABASE_USER_EMAIL`: email dell'utente Auth dedicato già esistente.
 - `SUPABASE_USER_PASSWORD`: password dello stesso utente.
 
-Il bot esegue `signInWithPassword` al primo salvataggio e quando la sessione manca o sta per scadere. La sessione resta in memoria sullo stesso client delle query. Prima del lookup verifica l'utente con `getUser`. I conti sono letti tramite RLS, filtrati per `user_id` e `is_active = true`, poi risolti dai nomi Revolut e Isybank. Nessun UUID è configurato nel codice. I log riportano soltanto codici applicativi, senza payload o errori grezzi dell'SDK.
+Il bot esegue `signInWithPassword` al primo salvataggio e quando la sessione manca o sta per scadere. La sessione resta in memoria sullo stesso client delle query. Prima del lookup verifica l'utente con `getUser`. I conti sono letti tramite RLS, filtrati per `user_id` e `is_active = true`, poi risolti dai nomi Revolut, Isybank e Contanti. Nessun UUID è configurato nel codice. I log riportano soltanto codici applicativi, senza payload o errori grezzi dell'SDK.
 
 Esegui personalmente questi controlli dal bot, osservando la tabella transactions in Supabase:
 
@@ -209,3 +209,197 @@ Esegui personalmente questi controlli dal bot, osservando la tabella transaction
 6. Facoltativamente, arresta il bot e configura temporaneamente una password errata solo nell'ambiente privato. Riavvia e conferma una proposta sintetica: errore leggibile, nessun falso successo e proposta ancora disponibile. Ripristina la password e riavvia prima di proseguire.
 
 In caso di risposta DB persa, verifica la tabella prima di riprovare: non è implementata idempotenza persistente. Se l'INSERT riesce ma la risposta Telegram fallisce, la riga resta salvata. Il collaudo reale non fa parte della suite automatica e non è stato eseguito dall'agente.
+
+
+## Contanti
+
+Contanti è supportato per entrate, uscite e trasferimenti. Nel testo libero gli
+alias `contanti`, `cash`, `in contanti` e `liquidi` individuano lo stesso conto.
+Due conti distinti in un movimento ordinario restano ambigui; più alias dello
+stesso conto non lo sono. Il conto predefinito resta Revolut; facoltativamente
+`DEFAULT_ACCOUNT=contanti` permette di usare Contanti quando il conto è omesso.
+
+Il wizard e Modifica offrono Contanti insieme a Revolut e Isybank. La conferma
+continua a essere necessaria per salvare. Esempi:
+
+- `12 pranzo in contanti`: uscita, Cibo, Contanti.
+- `100 stipendio cash`: entrata, Stipendio, Contanti.
+- `100 da revolut a contanti`: trasferimento verso Contanti.
+- `50 da liquidi a isybank`: trasferimento da Contanti.
+- `100 da cash a contanti`: rifiutato, perché i conti sono uguali.
+
+I trasferimenti richiedono ancora la forma esplicita `da <conto> a <conto>` e
+non vengono trattati come spese o entrate, anche se il testo contiene parole
+come spesa o stipendio. La categoria resta nulla.
+
+Prima di confermare un movimento Contanti, crea manualmente il conto come
+descritto in [supabase/README.md](../supabase/README.md#configurazione-manuale-del-conto-contanti).
+Se manca o non è attivo, il bot mostra l'errore esistente per conto non disponibile.
+Non sono implementati saldi iniziali, riconciliazione o descrizioni.
+
+## Riconciliazione Contanti (migrazione 005)
+
+Dopo l'applicazione manuale di 005, `/riconcilia` legge l'unico conto Contanti attivo
+in EUR del proprietario del bot. Scegli oggi o ieri a fine giornata, inserisci il
+saldo contato (anche `0`), verifica teorico/dichiarato/rettifica e premi Conferma.
+`Cambia saldo` torna all'importo; Annulla e `/cancel` chiudono il flusso senza scrivere,
+finché non è partita una conferma. Dopo un timeout, Annulla non annulla eventuali
+scritture già completate: ritenta dalla stessa anteprima per mantenere la chiave.
+Un conto senza entrambe le aperture configurate viene rifiutato.
+
+La chiusura include tutto il giorno, fuso Europe/Rome; chiudere oggi impedisce altri
+movimenti Contanti oggi. Date successive restano utilizzabili. Nessuna rettifica
+è una spesa, entrata o trasferimento. Riapertura e annullamento di rettifiche
+confermate non sono disponibili. Una differenza zero chiude comunque la giornata.
+
+Test manuali **nel progetto di test**, dopo l'allineamento del database:
+
+1. Con apertura assente: `/riconcilia` → Contanti oggi. Atteso: errore apertura,
+   nessuna richiesta di importo e nessuna scrittura.
+2. Con apertura verificata per l'ambiente di test: `/riconcilia` → Contanti ieri
+   → `12,50` (sostituisci con il saldo realmente contato per il test). Controlla
+   la differenza, premi Cambia saldo → `0` → Annulla. Nessuna rettifica salvata.
+3. Ripeti con il saldo contato e Conferma. Controlla una sola riga in
+   account_adjustments e saldo RPC uguale al dichiarato a fine giornata. Premi
+   nuovamente il vecchio pulsante: nessuna riga aggiuntiva.
+4. Dopo chiusura di ieri: `1 caffè contanti ieri` e `trasferisci 1 da Revolut a
+   Contanti ieri`. Conferma ciascuna proposta: atteso errore giornata riconciliata,
+   nessuna transazione inserita. Prova anche il trasferimento nella direzione inversa.
+5. `/riconcilia` → ieri già chiuso: atteso blocco con richiesta di riapertura non
+   disponibile. Un movimento oggi (se non chiuso) deve ancora funzionare.
+6. Prima della conferma, registra da un altro client autenticato di test un movimento
+   Contanti dello stesso giorno: la vecchia anteprima deve fallire per saldo cambiato.
+   Avvia una nuova `/riconcilia`. Per timeout e concorrenza usa anche i test automatici.
+
+Non usare questi esempi per inserire denaro inventato nei conti personali; gli
+importi sono input di prova da adattare nell'ambiente isolato.
+
+## Retry sicuri dei movimenti (migrazione 006, B1)
+
+La conferma ora salva tramite RPC atomica con una chiave legata alla fonte.
+Dopo un timeout usa **Riprova stessa operazione**: non cambiare i valori e non
+copiare il messaggio in uno nuovo. Anche dopo un riavvio il vecchio pulsante può
+verificare una ricevuta già salvata senza inserire un altro movimento. Annulla
+chiude soltanto la conversazione e non elimina eventuali scritture riuscite.
+
+Una nuova fonte identifica una nuova operazione: due messaggi identici possono
+registrare due spese legittime. Nel guidato vale il comando /menu o /start iniziale.
+Modificare una fonte già contabilizzata può produrre un'anteprima, ma la conferma
+con valori differenti viene rifiutata e la ricevuta viene verificata; non corregge
+né duplica il movimento originale. La gestione completa B6 resta separata.
+
+Dopo aver applicato 006 in un ambiente di test:
+
+1. Invia `0,29 tabacco revolut`, conferma due volte: una transazione e una ricevuta.
+2. Modifica **quel messaggio** in `0,30 tabacco revolut`: la conferma deve segnalare
+   conflitto e il numero di transazioni restare invariato.
+3. Invia **due messaggi distinti** `0,29 tabacco revolut`, conferma entrambi: due
+   ulteriori operazioni con chiavi diverse, entrambe valide.
+4. Per timeout, replay e riavvio usa i test automatici isolati. Il pulsante di una
+   proposta scaduta senza ricevuta deve effettuare solo una lettura.
+
+La migrazione non deduplica lo storico o le operazioni della vecchia versione:
+prima dell'aggiornamento controlla i vecchi esiti incerti. Non provare questi
+messaggi nei conti personali reali.
+
+## Menu, storico e anteprime (UX 1–4)
+
+All'avvio del polling il bot registra `/start`, `/menu`, `/movimenti`, `/riconcilia`,
+`/help`, `/cancel` tramite `setMyCommands`, con scope della chat autorizzata. Il
+webhook registra al primo POST autenticato di ciascun processo. Un errore non
+interrompe il bot e non espone il motivo grezzo. Non occorre modificare BotFather.
+Dopo build/riavvio apri la chat privata autorizzata, digita `/` o riapri la chat se
+Telegram mantiene il menu in cache. Il registro è `src/commands.ts`.
+
+Il menu contiene Movimento, Trasferimento, Storico e Contanti. Menu, wizard,
+modifiche di campi e riepilogo usano il message_id restituito da Telegram per
+aggiornare lo stesso pannello. Conferma e annullamento chiudono i pulsanti; la
+ricevuta conservata include i dati del movimento. Un nuovo flusso invalida il
+precedente e prova a rimuoverne i pulsanti. Un fallimento di modifica usa un nuovo
+messaggio; il vecchio stato rimane invalido. Non vengono eliminati messaggi utente
+o ricevute. L'errore Telegram “message is not modified” è un no-op riuscito.
+
+Un importo/data standalone continua a compilare il campo del wizard; un movimento
+completo in testo libero sostituisce il wizard. `/help` normale mostra la guida
+senza interrompere il flusso. Se la fonte della proposta viene modificata in
+`/help`, la proposta viene invece invalidata.
+
+Prima di creare un'anteprima da una fonte Telegram, il percorso di consegna legge
+`get_transaction_receipt` con **la stessa chiave B1**, senza un nuovo sistema di
+deduplicazione persistente. Una fonte già salvata mostra direttamente un avviso,
+anche dopo un riavvio e anche se modificata in un comando. Una lettura fallita
+blocca l'anteprima; una conferma con esito incerto mantiene la chiave B1. Fonti
+non salvate aggiornate in ritardo non possono sostituire una sessione più recente
+nel processo attivo. Due nuovi message_id identici nel contenuto rimangono due
+operazioni distinte.
+
+### Storico reale e paginazione
+
+`/movimenti` legge solo `transactions`, cinque operazioni per pagina, con una
+sesta riga di lookahead. La query usa sessione autenticata, filtro user_id e RLS,
+embedding dei due conti tramite FK esistenti. Ordine: transaction_date DESC,
+id DESC; il cursore contiene data e UUID dell'ultima riga visibile. Nessun conteggio
+completo, download del ledger o offset crescente. L'importo viene richiesto a
+PostgREST come `amount::text` e formattato con BigInt: niente perdita di centesimi
+per valori grandi. Valori storici incompatibili o valute non EUR producono un
+errore sicuro, senza arrotondamenti.
+
+Un trasferimento è una sola riga con origine → destinazione; non ha categoria né
+segno di entrata/uscita. Entrate e uscite mostrano +/− e categoria. Le rettifiche
+Contanti stanno in `account_adjustments` e **non** vengono mescolate allo storico
+delle transazioni o rappresentate come spese/entrate fittizie; lo storico lo
+precisa. Questa task non aggiunge uno storico dedicato delle rettifiche.
+
+Le callback di pagina hanno sessione e revisione; pagine non valide, letture in
+corso, scadenza, nuova operazione o riavvio impediscono navigazioni obsolete.
+Una lettura fallita invita a riaprire `/movimenti`; non permette modifiche,
+eliminazioni o annullamenti retroattivi. Nessuna nuova migrazione richiesta.
+
+### Limiti tecnici
+
+- I pannelli, le bozze e l'ordinamento degli update non salvati sono in memoria.
+  Dopo riavvio le vecchie callback non ricostruiscono bozze: solo quelle B1 con
+  chiave possono leggere una ricevuta. Non è introdotta persistenza delle bozze o
+  coordinamento UX multiistanza; polling unico rimane il percorso supportato.
+- La scadenza ripulisce il messaggio quando viene rilevata da un aggiornamento;
+  nessun nuovo servizio di background. Telegram può rifiutare modifiche di
+  messaggi non disponibili; fallback e invalidazione restano sicuri.
+- B1 non associa ricevute alle transazioni anteriori a 006: non è possibile
+  riconoscere automaticamente una vecchia fonte contabilizzata da quella versione.
+- La paginazione non è uno snapshot congelato tra richieste. Inserimenti recenti
+  non spostano le pagine successive; modifiche manuali retroattive del ledger
+  possono cambiarne il contenuto. Il cursore e il tie-break UUID sono stabili.
+- Nessun indice nuovo: limit e cursore evitano offset/download, ma grandi ledger
+  possono richiedere un futuro indice su user_id/transaction_date/id. Le FK e il
+  supporto PostgREST al cast testuale devono essere quelli della baseline. Il
+  catalogo remoto e Auth reale non sono stati interrogati durante questa task.
+- L'aggiornamento del menu Telegram avviene quando si avvia il bot aggiornato;
+  non è stato eseguito su Telegram durante lo sviluppo. Non sono stati letti token.
+
+### Collaudo manuale dopo il riavvio
+
+1. Digita `/`: devono apparire i sei comandi; `/start` e `/menu` mostrano quattro
+   opzioni. Apri Storico e Contanti dal menu.
+2. `/movimenti`: verifica importi, date/categorie/conti; su più di cinque righe usa
+   Avanti e Indietro. Un trasferimento deve apparire una volta con la freccia.
+3. Movimento → Entrata/Uscita → `12,50` → categoria → conto → oggi; torna indietro,
+   modifica l'importo nell'anteprima e annulla. Il messaggio principale si aggiorna
+   e nessun movimento viene salvato con Annulla.
+4. Trasferimento → `10` → Revolut → Contanti → ieri; conferma una sola volta e
+   riclicca: resta un movimento e una ricevuta leggibile.
+5. Nel wizard scrivi `12 pranzo contanti`: il testo libero sostituisce la
+   compilazione. Fuori dal wizard usa `100 stipendio revolut`.
+6. Prima di confermare `12 pranzo revolut`, modifica la fonte in `13 pranzo
+   contanti`: anteprima aggiornata e vecchi pulsanti invalidi. Modificala invece in
+   `/help`: proposta chiusa.
+7. Su dati di test conferma un movimento e modifica la sua fonte: solo avviso di
+   registrazione, nessuna anteprima. Invia lo stesso testo con un nuovo messaggio:
+   è una nuova operazione legittima. Riavvia e riprova il vecchio pulsante: solo
+   lettura di ricevuta, nessun nuovo salvataggio.
+8. Sostituisci una proposta con `/menu`, prova callback vecchie, `/cancel` e una
+   proposta oltre 30 minuti: nessuna conferma possibile. La pulizia è best effort.
+9. Ripeti `-€12 spesa revolut`, `−€12 spesa revolut`, `- EUR 12 spesa revolut`,
+   `–12 spesa revolut`, `12 da contanti a revolut e isybank`,
+   `20 da revolut a isybank o contanti`: nessuna anteprima confermabile.
+10. `/riconcilia`: prova annullamento e, solo con dati sintetici e apertura
+    configurata, conferma/doppio clic; il giorno chiuso resta protetto.

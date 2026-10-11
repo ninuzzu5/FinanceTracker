@@ -8,6 +8,7 @@ export type WizardValues = { amount: number | null; date: string | null } & (
 
 export interface WizardState {
   kind: "wizard";
+  requestId: string;
   id: string;
   revision: number;
   step: WizardStep;
@@ -15,4 +16,4 @@ export interface WizardState {
   values: WizardValues;
 }
 
-export interface MenuState { kind: "menu"; id: string }
+export interface MenuState { kind: "menu"; id: string; requestId: string }

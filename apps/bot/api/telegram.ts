@@ -1,3 +1,4 @@
+import { registerCommands } from "../src/commands.js";
 import {
   secretsMatch,
 } from "../src/telegram.js";
@@ -8,6 +9,7 @@ import { deliverUpdate } from "../src/flow-delivery.js";
 
 // Best-effort warm-process memory only; polling is the supported local workflow.
 const flow = new ProposalFlow();
+let commandsReady: Promise<void> | undefined;
 let pending: Promise<void> = Promise.resolve();
 
 interface ServerlessRequest {
@@ -48,9 +50,12 @@ export default async function handler(
   }
 
   const config = readBotConfig();
-  const delivery = pending.then(() => deliverUpdate(flow,
-    new TelegramClient(config.token, { maxAttempts: 1, timeoutMs: 2000 }), req.body,
-    { allowedChatId: config.allowedChatId, messageConfig: config }));
+  const client = new TelegramClient(config.token, { maxAttempts: 1, timeoutMs: 2000 });
+  const delivery = pending.then(async () => {
+    commandsReady ??= registerCommands(client, config.allowedChatId);
+    await commandsReady;
+    await deliverUpdate(flow, client, req.body, { allowedChatId: config.allowedChatId, messageConfig: config });
+  });
   pending = delivery.catch(() => {});
   await delivery;
 

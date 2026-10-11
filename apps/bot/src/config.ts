@@ -21,7 +21,7 @@ export function readMessageConfig(env: NodeJS.ProcessEnv = process.env): Message
   }
   const defaultAccount = env.DEFAULT_ACCOUNT ?? "revolut";
   if (!accountIds.includes(defaultAccount as AccountId)) {
-    throw new ConfigurationError("DEFAULT_ACCOUNT non valido: usa revolut oppure isybank.");
+    throw new ConfigurationError("DEFAULT_ACCOUNT non valido: usa revolut, isybank oppure contanti.");
   }
   return { timeZone, defaultAccount: defaultAccount as AccountId };
 }

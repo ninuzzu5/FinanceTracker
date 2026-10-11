@@ -1,11 +1,13 @@
-import { categoryLabels, transactionTypeLabels } from "@finance-tracker/domain";
+import { euro } from "./money-view.js";
+import { compactOperationKey } from "./operation-key.js";
+import { accountIds, accountLabels, categoryLabels, transactionTypeLabels } from "@finance-tracker/domain";
 import { categoriesFor, type Proposal } from "./proposals.js";
 
 export type InlineKeyboard = { inline_keyboard: { text: string; callback_data: string }[][] };
-const button = (p: Proposal, text: string, action: string) => ({ text, callback_data: `p:${p.id}:${p.revision}:${action}` });
+const button = (p: Proposal, text: string, action: string) => ({ text, callback_data: `p:${p.id}:${p.revision}:${action}${action === "confirm" ? `:${compactOperationKey(p.requestId)}` : ""}` });
 
 export function proposalKeyboard(p: Proposal): InlineKeyboard {
-  return { inline_keyboard: [[button(p, "✅ Conferma", "confirm"), button(p, "✏️ Modifica", "edit"), button(p, "❌ Annulla", "cancel")]] };
+  return { inline_keyboard: [[button(p, p.submitted ? "🔄 Riprova stessa operazione" : "✅ Conferma", "confirm"), ...(p.submitted ? [] : [button(p, "✏️ Modifica", "edit")]), button(p, "❌ Annulla", "cancel")]] };
 }
 
 export function backKeyboard(p: Proposal): InlineKeyboard {
@@ -24,7 +26,7 @@ export function fieldKeyboard(p: Proposal): InlineKeyboard {
 }
 
 export function choicesKeyboard(p: Proposal, field: "account" | "fromAccount" | "toAccount" | "type" | "category"): InlineKeyboard {
-  const choices = ["account", "fromAccount", "toAccount"].includes(field) ? [["revolut", "Revolut"], ["isybank", "Isybank"]]
+  const choices = ["account", "fromAccount", "toAccount"].includes(field) ? accountIds.map(id => [id, accountLabels[id]])
     : field === "type" ? Object.entries(transactionTypeLabels)
       : categoriesFor(p.type).map((id) => [id, categoryLabels[id]]);
   return { inline_keyboard: [
@@ -33,17 +35,17 @@ export function choicesKeyboard(p: Proposal, field: "account" | "fromAccount" | 
   ] };
 }
 
-export function proposalText(p: Proposal, title = "Anteprima aggiornata, bro 👌"): string {
+export function proposalText(p: Proposal, title = "Anteprima aggiornata", receipt = false): string {
   return [
     title, "",
-    `💶 ${p.amount.toLocaleString("it-IT", { style: "currency", currency: "EUR" })}`,
+    `💶 ${euro(p.amount, p.type === "expense" ? "−" : p.type === "income" ? "+" : "")}`,
     ...(p.type === "transfer" ? [
-      `Da: ${p.fromAccount === null ? "da confermare" : p.fromAccount === "revolut" ? "Revolut" : "Isybank"}`,
-      `A: ${p.toAccount === null ? "da confermare" : p.toAccount === "revolut" ? "Revolut" : "Isybank"}`,
-    ] : [`🏦 ${p.account === null ? "da confermare" : p.account === "revolut" ? "Revolut" : "Isybank"}`]),
+      `Da: ${p.fromAccount === null ? "da confermare" : accountLabels[p.fromAccount]}`,
+      `A: ${p.toAccount === null ? "da confermare" : accountLabels[p.toAccount]}`,
+    ] : [`🏦 ${p.account === null ? "da confermare" : accountLabels[p.account]}`]),
     `📅 ${p.date.split("-").reverse().join("/")}`,
     `↔️ Tipo: ${p.type ? transactionTypeLabels[p.type] : "da confermare"}`,
     ...(p.type === "transfer" ? [] : [`🏷️ Categoria: ${p.category ? categoryLabels[p.category] : "da confermare"}`]),
-    "", "Solo anteprima: non ho salvato nulla.",
+    ...(receipt ? [] : ["", p.submitted ? "Esito da verificare: il movimento potrebbe essere già salvato. Conferma ritenta la stessa operazione." : "Solo anteprima: Conferma salva o recupera la ricevuta della stessa operazione."]),
   ].join("\n");
 }

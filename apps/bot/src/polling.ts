@@ -1,3 +1,4 @@
+import { registerCommands } from "./commands.js";
 import type { BotConfig } from "./config.js";
 import { isRecord, updateId } from "./telegram.js";
 import { ProposalFlow } from "./proposal-flow.js";
@@ -17,6 +18,7 @@ export async function runPolling(
   if (webhook.url) {
     throw new TelegramError("Webhook Telegram già configurato: polling non avviato. Disattivalo esplicitamente prima di riprovare; non è stato modificato.");
   }
+  await registerCommands(client, config.allowedChatId, signal);
   options.onReady?.();
   let offset = 0;
   const flow = new ProposalFlow();

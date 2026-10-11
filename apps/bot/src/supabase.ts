@@ -1,6 +1,15 @@
+import { historyCents } from "./history.js";
+import type { HistoryRepository, HistoryCursor, HistoryPage, HistoryMovement } from "./history.js";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import type { TransactionDraft } from "@finance-tracker/domain";
-import { PersistenceError, mapTransaction, type AccountRow, type TransactionRepository } from "./persistence.js";
+import { accountIds, amountInCents, type TransactionDraft } from "@finance-tracker/domain";
+import { decimalCents, centsDecimal, ReconciliationError, type ReconciliationRepository, type CashPreview, type CashRequest, type CashReceipt } from "./reconciliation.js";
+import { PersistenceError, mapTransaction, type TransactionRepository } from "./persistence.js";
+
+export const boundedSupabaseFetch: typeof fetch = (input, init) => {
+  const timeout = AbortSignal.timeout(15_000);
+  const signal = init?.signal ? AbortSignal.any([init.signal, timeout]) : timeout;
+  return fetch(input, { ...init, signal });
+};
 
 export interface SupabaseConfig { url: string; anonKey: string; email: string; password: string }
 export function readSupabaseConfig(env: NodeJS.ProcessEnv = process.env): SupabaseConfig {
@@ -16,18 +25,19 @@ export function readSupabaseConfig(env: NodeJS.ProcessEnv = process.env): Supaba
 }
 
 function queryError(stage: "accounts_query" | "insert", code?: string): PersistenceError {
-  return new PersistenceError(code === "42501" ? "rls" : code?.startsWith("23") ? "constraint" : stage);
+  return new PersistenceError(code === "PT422" ? "currency" : code === "PT409" ? "conflict" : code === "PT404" ? "account_missing" : code === "22023" ? "mapping" : code === "PGRST202" ? "configuration" : code === "PT423" ? "closed" : code === "42501" ? "rls" : code?.startsWith("23") ? "constraint" : stage);
 }
 
-export class SupabaseTransactionRepository implements TransactionRepository {
+export class SupabaseTransactionRepository implements TransactionRepository, ReconciliationRepository, HistoryRepository {
   private client?: SupabaseClient;
   private config?: SupabaseConfig;
   constructor(private readonly configuration = readSupabaseConfig, private readonly clientFactory = createClient) {}
 
-  async saveTransaction(transaction: TransactionDraft): Promise<{ id: string }> {
+  private async authenticate(): Promise<{ client: SupabaseClient; userId: string }> {
     this.config ??= this.configuration();
     this.client ??= this.clientFactory(this.config.url, this.config.anonKey, {
       auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+      global: { fetch: boundedSupabaseFetch },
     });
     const client = this.client;
     let session;
@@ -48,20 +58,102 @@ export class SupabaseTransactionRepository implements TransactionRepository {
       if (error || !data.user || data.user.id !== session.user.id) throw new PersistenceError("session");
       userId = data.user.id;
     } catch { throw new PersistenceError("session"); }
-    let accounts: AccountRow[];
+    return { client, userId };
+  }
+
+  async getTransactionReceipt(requestId: string): Promise<{ id: string } | null> {
+    const { client } = await this.authenticate();
     try {
-      const { data, error } = await client.from("accounts").select("id,user_id,name,is_active").eq("user_id", userId).eq("is_active", true);
-      if (error) throw queryError("accounts_query", error.code);
-      if (!Array.isArray(data) || data.some(row => typeof row.id !== "string" || typeof row.user_id !== "string" || typeof row.name !== "string")) throw new PersistenceError("accounts_query");
-      accounts = data;
-    } catch (error) { throw error instanceof PersistenceError ? error : new PersistenceError("accounts_query"); }
-    const payload = mapTransaction(transaction, userId, accounts);
-    try {
-      const { data, error } = await client.from("transactions").insert(payload).select("id").single();
+      const { data, error } = await client.rpc("get_transaction_receipt", { p_request_id: requestId });
       if (error) throw queryError("insert", error.code);
-      if (!data || typeof data.id !== "string") throw new PersistenceError("insert");
-      return { id: data.id };
+      if (!Array.isArray(data) || data.length > 1) throw new PersistenceError("insert");
+      if (data.length === 0) return null;
+      if (typeof data[0]?.transaction_id !== "string") throw new PersistenceError("insert");
+      return { id: data[0].transaction_id };
     } catch (error) { throw error instanceof PersistenceError ? error : new PersistenceError("insert"); }
   }
+
+  async saveTransaction(transaction: TransactionDraft, requestId: string): Promise<{ id: string }> {
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(requestId)) throw new PersistenceError("mapping");
+    const { client, userId } = await this.authenticate();
+    // Reuse domain validation with conceptual IDs. UUID resolution now occurs inside the atomic RPC.
+    const payload = mapTransaction(transaction, userId, accountIds.map(name => ({ id: name, name, user_id: userId, currency: "EUR", is_active: true })));
+    const cents = BigInt(amountInCents(payload.amount)!);
+    try {
+      const { data, error } = await client.rpc("save_transaction_once", { p_request_id: requestId,
+        p_type: payload.type, p_amount: centsDecimal(cents), p_date: payload.transaction_date,
+        p_category: payload.category, p_from_account: payload.from_account_id, p_to_account: payload.to_account_id });
+      if (error) throw queryError("insert", error.code);
+      if (!Array.isArray(data) || data.length !== 1 || typeof data[0]?.transaction_id !== "string") throw new PersistenceError("insert");
+      return { id: data[0].transaction_id };
+    } catch (error) { throw error instanceof PersistenceError ? error : new PersistenceError("insert"); }
+  }
+
+  async getMovements(cursor: HistoryCursor | null): Promise<HistoryPage> {
+    if (cursor && (!/^\d{4}-\d{2}-\d{2}$/.test(cursor.date) || !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(cursor.id))) throw new PersistenceError('mapping');
+    const { client, userId } = await this.authenticate();
+    try {
+      let query = client.from('transactions').select('id,type,amount::text,transaction_date::text,category,from_account:accounts!transactions_from_account_id_fkey(name,currency),to_account:accounts!transactions_to_account_id_fkey(name,currency)')
+        .eq('user_id', userId).order('transaction_date', { ascending: false }).order('id', { ascending: false }).limit(6);
+      if (cursor) query = query.or(`transaction_date.lt.${cursor.date},and(transaction_date.eq.${cursor.date},id.lt.${cursor.id})`);
+      const { data, error } = await query;
+      if (error || !Array.isArray(data)) throw new PersistenceError('accounts_query');
+      const rows: HistoryMovement[] = data.map(row => {
+        if (!row || typeof row.id !== 'string' || !['expense','income','transfer'].includes(row.type) || typeof row.amount !== 'string' ||
+          !/^\d{4}-\d{2}-\d{2}$/.test(row.transaction_date) || historyCents(row.amount) <= 0n) throw new PersistenceError('mapping');
+        const account = (value: unknown): string | null => {
+          if (value === null) return null;
+          if (!value || Array.isArray(value) || typeof value !== 'object' || !('name' in value) || typeof value.name !== 'string' || !('currency' in value) || value.currency !== 'EUR') throw new PersistenceError('currency');
+          return value.name.replace(/[\r\n\t]/g," ").slice(0,100);
+        };
+        const from = account(row.from_account), to = account(row.to_account);
+        if ((row.type === 'transfer' && (!from || !to)) || (row.type === 'expense' && !from) || (row.type === 'income' && !to)) throw new PersistenceError('mapping');
+        return { id: row.id, type: row.type, amount: row.amount, date: row.transaction_date, category: row.category, from, to };
+      });
+      const visible = rows.slice(0,5), last = visible.at(-1);
+      return { rows: visible, next: rows.length > 5 && last ? {date:last.date,id:last.id} : null };
+    } catch (error) { throw error instanceof PersistenceError ? error : new PersistenceError('accounts_query'); }
+  }
+
+  private async cashRpc(name: string, args: Record<string, string>): Promise<Record<string, unknown>> {
+    let client: SupabaseClient;
+    try { ({ client } = await this.authenticate()); }
+    catch { throw new ReconciliationError('access'); }
+    try {
+      const { data, error } = await client.rpc(name, args);
+      if (error) {
+        const codes: Record<string, ConstructorParameters<typeof ReconciliationError>[0]> = {
+          PT412: 'unconfigured', PT423: 'closed', PT409: 'changed', PT404: 'account',
+          '42501': 'access', '22023': 'invalid', '22003': 'invalid', PGRST202: 'access',
+          '23505': 'changed',
+        };
+        throw new ReconciliationError(codes[error.code] ?? 'unknown');
+      }
+      if (!Array.isArray(data) || data.length !== 1 || !data[0] || typeof data[0] !== 'object') throw new ReconciliationError('unknown');
+      return data[0];
+    } catch (error) { throw error instanceof ReconciliationError ? error : new ReconciliationError('unknown'); }
+  }
+
+  async previewCash(date: string): Promise<CashPreview> {
+    const row = await this.cashRpc('preview_cash_reconciliation', { p_date: date });
+    if (typeof row.account_id !== 'string' || typeof row.theoretical_balance !== 'string') throw new ReconciliationError('unknown');
+    try {
+      const theoretical = centsDecimal(decimalCents(row.theoretical_balance));
+      return { accountId: row.account_id, theoretical };
+    } catch { throw new ReconciliationError('unknown'); }
+  }
+
+  async reconcileCash(request: CashRequest): Promise<CashReceipt> {
+    if (decimalCents(request.observed) < 0n) throw new ReconciliationError('invalid');
+    decimalCents(request.expected);
+    const row = await this.cashRpc('reconcile_cash', { p_account_id: request.accountId, p_date: request.date,
+      p_observed: request.observed, p_expected: request.expected, p_request_id: request.requestId });
+    if (typeof row.adjustment_id !== 'string' || typeof row.delta !== 'string' || typeof row.observed_balance !== 'string') throw new ReconciliationError('unknown');
+    try {
+      if (decimalCents(row.observed_balance) !== decimalCents(request.observed) || decimalCents(row.delta) !== decimalCents(request.observed) - decimalCents(request.expected)) throw new ReconciliationError('unknown');
+      return { id: row.adjustment_id, delta: centsDecimal(decimalCents(row.delta)), observed: centsDecimal(decimalCents(row.observed_balance)) };
+    } catch { throw new ReconciliationError('unknown'); }
+  }
+
 }
-export const supabaseRepository: TransactionRepository = new SupabaseTransactionRepository();
+export const supabaseRepository: TransactionRepository & ReconciliationRepository & HistoryRepository = new SupabaseTransactionRepository();

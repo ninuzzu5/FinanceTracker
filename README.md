@@ -6,7 +6,7 @@ FinanceTracker è un progetto personale per registrare spese, entrate e trasferi
 
 ## Stato attuale
 
-Il bot funziona localmente tramite long polling, in una sola istanza e per una chat privata autorizzata. Supporta testo libero e inserimento guidato. Dashboard, budget, saldi, statistiche e realtime non sono ancora implementati.
+Il bot funziona localmente tramite long polling, in una sola istanza e per una chat privata autorizzata. Supporta testo libero e inserimento guidato. La migrazione 004 prepara saldi iniziali e calcolo SQL dei saldi teorici, con configurazione manuale e nessun nuovo comando Telegram. Dashboard, budget, rettifiche, riconciliazioni, statistiche e realtime non sono ancora implementati.
 
 ```text
 Messaggio o inserimento guidato
@@ -39,7 +39,7 @@ Con `/start` o `/menu` si apre il flusso guidato; `/help` mostra gli esempi e `/
 
 Il bot usa una chiave Supabase pubblica anon e le credenziali di un utente Auth dedicato. `signInWithPassword` crea una sessione in memoria sullo stesso client delle query; `getUser` verifica l'utente prima del salvataggio. Le query restano soggette a RLS. La service role non viene utilizzata.
 
-Revolut e Isybank sono identificatori logici: il repository risolve gli UUID dai conti attivi dell'utente, senza hardcoding o creazione automatica. Una spesa usa `from_account_id`, un'entrata `to_account_id`, un trasferimento entrambi con conti distinti e categoria NULL. Non vengono spostati fondi presso le banche.
+Revolut, Isybank e Contanti sono identificatori logici: il repository risolve gli UUID dai conti attivi dell'utente, senza hardcoding o creazione automatica. Una spesa usa `from_account_id`, un'entrata `to_account_id`, un trasferimento entrambi con conti distinti e categoria NULL. Non vengono spostati fondi presso le banche.
 
 ## Sviluppo locale
 
@@ -63,7 +63,7 @@ Per avviare il bot, copia `.env.example` in `.env.local` e compila privatamente:
 | `SUPABASE_USER_EMAIL` | Email dell'utente Auth dedicato |
 | `SUPABASE_USER_PASSWORD` | Password dello stesso utente |
 | `APP_TIMEZONE` | Default `Europe/Rome` |
-| `DEFAULT_ACCOUNT` | Default `revolut`, alternativa `isybank` |
+| `DEFAULT_ACCOUNT` | Default `revolut`, alternative `isybank` e `contanti` |
 
 `TELEGRAM_WEBHOOK_SECRET` serve soltanto al webhook. Il polling locale carica `.env.local` con il loader nativo di Node; le variabili già presenti nella shell hanno precedenza.
 
@@ -99,7 +99,7 @@ Non esiste idempotenza persistente: se la risposta del database si perde, verifi
 ## Roadmap
 
 - Implementare la dashboard web.
-- Aggiungere budget, saldi e statistiche.
+- Integrare la lettura dei saldi SQL nel bot; aggiungere rettifiche, budget e statistiche.
 - Valutare realtime e un classificatore locale per i casi non riconosciuti dalle regole.
 
 ## Licenza

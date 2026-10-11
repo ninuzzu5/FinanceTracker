@@ -1,4 +1,4 @@
-vi.mock("../src/supabase.js", () => ({ supabaseRepository: { saveTransaction: vi.fn().mockResolvedValue({ id: "synthetic-row" }) } }));
+vi.mock("../src/supabase.js", () => ({ supabaseRepository: { getTransactionReceipt: vi.fn().mockResolvedValue(null), saveTransaction: vi.fn().mockResolvedValue({ id: "synthetic-row" }) } }));
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import handler from "../api/telegram.js";
 
@@ -13,6 +13,7 @@ beforeEach(() => {
 afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); vi.useRealTimers(); });
 
 const response = () => ({ setHeader: vi.fn(), status: vi.fn().mockReturnThis(), json: vi.fn() });
+let sourceId = 1000;
 const headers = { "x-telegram-bot-api-secret-token": "synthetic-secret" };
 
 describe("webhook regression", () => {
@@ -20,14 +21,15 @@ describe("webhook regression", () => {
     await handler({ method: "POST", headers, body: { update_id: 101, message: {
       message_id: 101, text: "8,30 tabacco", chat: { id: 123456, type: "private" },
     } } }, response());
-    const initial = JSON.parse(vi.mocked(fetch).mock.calls[0][1]?.body as string);
+    const initial = JSON.parse(vi.mocked(fetch).mock.calls.find(([url]) => String(url).endsWith("/sendMessage"))![1]?.body as string);
     const data = initial.reply_markup.inline_keyboard[0][0].callback_data;
     await handler({ method: "POST", headers, body: { update_id: 102, callback_query: {
       id: "synthetic-callback", from: { id: 123456 }, data,
       message: { message_id: 201, chat: { id: 123456, type: "private" } },
     } } }, response());
     const calls = vi.mocked(fetch).mock.calls;
-    expect(calls).toHaveLength(4);
+    expect(calls.filter(([url]) => !String(url).endsWith("/setMyCommands"))).toHaveLength(4);
+    calls.splice(0,1);
     expect(JSON.parse(calls[1][1]?.body as string)).toHaveProperty("callback_query_id", "synthetic-callback");
     expect(JSON.parse(calls[2][1]?.body as string)).toHaveProperty("reply_markup.inline_keyboard", []);
     expect(JSON.parse(calls[3][1]?.body as string).text).toContain("Transazione registrata");
@@ -37,10 +39,10 @@ describe("webhook regression", () => {
     vi.setSystemTime(new Date("2026-09-18T12:00:00Z"));
     const res = response();
     await handler({ method: "POST", headers, body: { update_id: 2, edited_message: {
-      message_id: 1, text: "mercoledì barbiere 34€ isybank", chat: { id: 123456, type: "private" },
+      message_id: 202, text: "mercoledì barbiere 34€ isybank", chat: { id: 123456, type: "private" },
     } } }, res);
     expect(res.status).toHaveBeenCalledWith(200);
-    const request = vi.mocked(fetch).mock.calls[0][1];
+    const request = vi.mocked(fetch).mock.calls.find(([url]) => String(url).endsWith("/sendMessage"))![1];
     const body = JSON.parse(request?.body as string);
     expect(body.text).toContain("Isybank");
     expect(body.text).toContain("16/09/2026");
@@ -60,7 +62,7 @@ describe("webhook regression", () => {
   });
   it.each(["/start", "/help", "8,30 tabacco", "ciao"])("still responds to %s", async (text) => {
     const res = response();
-    await handler({ method: "POST", headers, body: { update_id: 1, message: { message_id: 1, text, chat: { id: 123456, type: "private" } } } }, res);
+    await handler({ method: "POST", headers, body: { update_id: ++sourceId, message: { message_id: sourceId, text, chat: { id: 123456, type: "private" } } } }, res);
     expect(res.status).toHaveBeenCalledWith(200);
     expect(fetch).toHaveBeenCalledTimes(1);
   });

@@ -38,8 +38,8 @@ function apiError(code: number, retryAfter: unknown): TelegramError {
 export class TelegramClient {
   constructor(private readonly token: string, private readonly options: TransportOptions = {}) {}
 
-  async call(method: "getUpdates" | "getWebhookInfo" | "sendMessage" | "answerCallbackQuery" | "editMessageReplyMarkup", body: Record<string, unknown>, signal?: AbortSignal): Promise<unknown> {
-    const ancillary = method === "answerCallbackQuery" || method === "editMessageReplyMarkup";
+  async call(method: "getUpdates" | "getWebhookInfo" | "sendMessage" | "answerCallbackQuery" | "editMessageReplyMarkup" | "editMessageText" | "setMyCommands", body: Record<string, unknown>, signal?: AbortSignal): Promise<unknown> {
+    const ancillary = method === "answerCallbackQuery" || method === "editMessageReplyMarkup" || method === "editMessageText" || method === "setMyCommands";
     const attempts = ancillary ? 1 : this.options.maxAttempts ?? 5;
     for (let attempt = 0; attempt < attempts; attempt++) {
       signal?.throwIfAborted();
@@ -53,6 +53,8 @@ export class TelegramClient {
         const data: unknown = await response.json().catch(() => null);
         if (!response.ok || (isRecord(data) && data.ok === false)) {
           const code = isRecord(data) && typeof data.error_code === "number" ? data.error_code : response.status;
+          // Reapplying the same UI state is a successful no-op, not a reason to send duplicates.
+          if ((method === 'editMessageText' || method === 'editMessageReplyMarkup') && code === 400 && isRecord(data) && typeof data.description === 'string' && data.description.includes('message is not modified')) return true;
           const parameters = isRecord(data) && isRecord(data.parameters) ? data.parameters : {};
           throw apiError(code, parameters.retry_after);
         }
@@ -72,7 +74,8 @@ export class TelegramClient {
     throw new TelegramError("Tentativi Telegram esauriti.");
   }
 
-  async sendMessage(chatId: number, text: string, signal?: AbortSignal, keyboard?: InlineKeyboard): Promise<void> {
-    await this.call("sendMessage", { chat_id: chatId, text, ...(keyboard ? { reply_markup: keyboard } : {}) }, signal);
+  async sendMessage(chatId: number, text: string, signal?: AbortSignal, keyboard?: InlineKeyboard): Promise<number | void> {
+    const result = await this.call("sendMessage", { chat_id: chatId, text, ...(keyboard ? { reply_markup: keyboard } : {}) }, signal);
+    if (isRecord(result) && Number.isSafeInteger(result.message_id)) return result.message_id as number;
   }
 }

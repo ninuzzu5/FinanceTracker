@@ -29,3 +29,22 @@ The dashboard and realtime are planned, not implemented. Supabase is the source 
 Account names are matched case-insensitively after trimming, only among active accounts owned by the authenticated user. Missing or ambiguous names fail before insertion. Expense uses the source account, income the destination, transfer both distinct accounts and a null category. Description is omitted because proposals do not retain original text.
 
 No automatic insert retry or durable idempotency is implemented. A lost database response may leave an uncertain write; the user must inspect the database before retrying. A successful insert followed by failed Telegram delivery remains persisted. Local single-process polling is the supported workflow; webhook memory does not coordinate multiple instances.
+
+
+## Account openings and theoretical balances (Milestone 1)
+
+Migration 004 adds nullable `accounts.opening_balance` / `opening_date`, configured
+manually as a pair. Opening means start of day; the SQL RPC `get_account_balances`
+includes movements from that day through an explicitly supplied date. It calculates
+balances from source transactions, including both transfer directions, without a
+stored running total. Unconfigured accounts and dates before opening yield separate
+statuses and null balances. Inactive owned accounts remain visible.
+
+The RPC is invoker-only with explicit owner filtering and RLS. Exact PostgreSQL
+numeric arithmetic and cent precision checks avoid rounding historical rows.
+Persistence validates two-decimal numeric inputs without changing its payload.
+Negative bank openings are allowed; cash openings are nonnegative. Local SQL/RLS
+tests run against disposable embedded PostgreSQL with synthetic Auth fixtures.
+No remote migration, opening seed, cash adjustment, reconciliation, description
+feature or dashboard is introduced. See the Supabase README for preflight and manual
+configuration. There is no bot command for setting or reading openings yet.

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { mapTransaction, PersistenceError, type AccountRow } from "../src/persistence.js";
+import { mapTransaction, persistenceMessage, PersistenceError, type AccountRow } from "../src/persistence.js";
 import { SupabaseTransactionRepository, readSupabaseConfig } from "../src/supabase.js";
 import { ProposalFlow } from "../src/proposal-flow.js";
 import { deliverUpdate } from "../src/flow-delivery.js";
@@ -7,10 +7,12 @@ import type { TransactionDraft } from "@finance-tracker/domain";
 
 const sdk = vi.hoisted(() => ({ createClient: vi.fn() }));
 vi.mock("@supabase/supabase-js", () => ({ createClient: sdk.createClient }));
+const requestId = "40000000-0000-4000-8000-000000000001";
 const user = "00000000-0000-4000-8000-000000000001";
 const accounts: AccountRow[] = [
-  { id: "00000000-0000-4000-8000-000000000002", user_id: user, name: "Revolut", is_active: true },
-  { id: "00000000-0000-4000-8000-000000000003", user_id: user, name: "Isybank", is_active: true },
+  { id: "00000000-0000-4000-8000-000000000002", user_id: user, name: "Revolut", currency: "EUR", is_active: true },
+  { id: "00000000-0000-4000-8000-000000000003", user_id: user, name: "Isybank", currency: "EUR", is_active: true },
+  { id: "00000000-0000-4000-8000-000000000004", user_id: user, name: " Contanti ", currency: "EUR", is_active: true },
 ];
 const expense: TransactionDraft = { type: "expense", amount: 12.5, date: "2026-09-18", account: "revolut", category: "food" };
 const credentials = { url: "https://synthetic.example", anonKey: "synthetic-public-key", email: "bot@example.invalid", password: "synthetic-password" };
@@ -22,44 +24,67 @@ function setup(options: { loginError?: boolean; sessionInvalid?: boolean; accoun
     getSession: vi.fn().mockResolvedValue({ data: { session: null }, error: null }),
     signInWithPassword: vi.fn().mockResolvedValue({ data: { session: options.sessionInvalid ? null : session }, error: options.loginError ? new Error("private credentials") : null }),
     getUser: vi.fn().mockResolvedValue({ data: { user: { id: user } }, error: null }),
-  }, from: vi.fn((table: string) => table === "accounts" ? accountsQuery : insertQuery) };
+  }, from: vi.fn((table: string) => table === "accounts" ? accountsQuery : insertQuery),
+    rpc: vi.fn(async (name: string, args: Record<string, unknown>) => {
+      if (name === "get_transaction_receipt") return { data: [], error: null };
+      if (options.accountsError) return { data: null, error: { code: options.accountsError } };
+      const resolve = (alias: unknown) => {
+        if (alias === null) return null;
+        const matches = (options.rows ?? accounts).filter(a => a.user_id === user && a.is_active && a.name.trim().toLowerCase() === alias);
+        return matches.length === 1 ? matches[0].id : undefined;
+      };
+      const from = resolve(args.p_from_account), to = resolve(args.p_to_account);
+      if (from === undefined || to === undefined) return { data: null, error: { code: "PT404" } };
+      if ((options.rows ?? accounts).some(a => [from, to].includes(a.id) && a.currency !== "EUR")) return { data: null, error: { code: "PT422" } };
+      insertQuery.insert({ user_id: user, type: args.p_type, amount: Number(args.p_amount), transaction_date: args.p_date,
+        category: args.p_category, from_account_id: from, to_account_id: to });
+      const result = await insertQuery.single();
+      return { data: [{ transaction_id: result.data.id }], error: result.error };
+    }),
+  };
   sdk.createClient.mockReturnValue(client);
   return { repository: new SupabaseTransactionRepository(() => credentials), client, accountsQuery, insertQuery };
 }
-afterEach(() => { vi.restoreAllMocks(); sdk.createClient.mockReset(); });
+afterEach(() => { messageVersion = 0; vi.useRealTimers(); vi.restoreAllMocks(); sdk.createClient.mockReset(); });
 
 describe("Supabase transaction persistence", () => {
   it.each([
     [expense, accounts[0].id, null, "food"],
+    [{ ...expense, account: "contanti" }, accounts[2].id, null, "food"],
+    [{ ...expense, type: "income", category: "salary", account: "contanti" }, null, accounts[2].id, "salary"],
+    [{ type: "transfer", amount: 12.5, date: expense.date, fromAccount: "revolut", toAccount: "contanti" }, accounts[0].id, accounts[2].id, null],
+    [{ type: "transfer", amount: 12.5, date: expense.date, fromAccount: "contanti", toAccount: "revolut" }, accounts[2].id, accounts[0].id, null],
+    [{ type: "transfer", amount: 12.5, date: expense.date, fromAccount: "isybank", toAccount: "contanti" }, accounts[1].id, accounts[2].id, null],
+    [{ type: "transfer", amount: 12.5, date: expense.date, fromAccount: "contanti", toAccount: "isybank" }, accounts[2].id, accounts[1].id, null],
     [{ ...expense, type: "income", category: "salary", account: "isybank" }, null, accounts[1].id, "salary"],
     [{ type: "transfer", amount: 12.5, date: expense.date, fromAccount: "revolut", toAccount: "isybank" }, accounts[0].id, accounts[1].id, null],
     [{ type: "transfer", amount: 12.5, date: expense.date, fromAccount: "isybank", toAccount: "revolut" }, accounts[1].id, accounts[0].id, null],
   ] as const)("maps and inserts %s using authenticated ownership", async (transaction, from, to, category) => {
     const { repository, client, accountsQuery, insertQuery } = setup();
-    await expect(repository.saveTransaction(transaction as TransactionDraft)).resolves.toEqual({ id: "synthetic-transaction" });
+    await expect(repository.saveTransaction(transaction as TransactionDraft, requestId)).resolves.toEqual({ id: "synthetic-transaction" });
     expect(client.auth.signInWithPassword).toHaveBeenCalledWith({ email: credentials.email, password: credentials.password });
-    expect(accountsQuery.eq).toHaveBeenCalledWith("user_id", user);
-    expect(accountsQuery.eq).toHaveBeenCalledWith("is_active", true);
+    expect(client.from).not.toHaveBeenCalled();
+    expect(client.rpc).toHaveBeenCalledWith("save_transaction_once", expect.objectContaining({ p_request_id: requestId, p_amount: "12.50", p_type: transaction.type }));
     expect(insertQuery.insert).toHaveBeenCalledWith({ user_id: user, type: transaction.type, amount: 12.5, transaction_date: expense.date, category, from_account_id: from, to_account_id: to });
-    expect(sdk.createClient).toHaveBeenCalledWith(credentials.url, credentials.anonKey, { auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false } });
+    expect(sdk.createClient).toHaveBeenCalledWith(credentials.url, credentials.anonKey, { auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false }, global: { fetch: expect.any(Function) } });
   });
   it.each([
     [{ loginError: true }, "authentication"], [{ sessionInvalid: true }, "session"],
-    [{ accountsError: "XX000" }, "accounts_query"], [{ rows: [] }, "account_missing"],
-    [{ insertError: "XX000" }, "insert"], [{ insertError: "23514" }, "constraint"], [{ insertError: "42501" }, "rls"],
+    [{ accountsError: "XX000" }, "insert"], [{ rows: [] }, "account_missing"],
+    [{ insertError: "XX000" }, "insert"], [{ insertError: "23514" }, "constraint"], [{ insertError: "42501" }, "rls"], [{ insertError: "PT423" }, "closed"], [{ insertError: "PT422" }, "currency"],
   ] as const)("propagates safe error %s", async (options, code) => {
     const { repository, insertQuery } = setup(options);
-    await expect(repository.saveTransaction(expense)).rejects.toMatchObject({ code, message: `Transaction persistence failed: ${code}` });
-    if (!["insert", "constraint", "rls"].includes(code)) expect(insertQuery.insert).not.toHaveBeenCalled();
+    await expect(repository.saveTransaction(expense, requestId)).rejects.toMatchObject({ code, message: `Transaction persistence failed: ${code}` });
+    if (!["insert", "constraint", "rls", "closed", "currency"].includes(code)) expect(insertQuery.insert).not.toHaveBeenCalled();
   });
   it("reuses valid session and verifies the user before queries", async () => {
     const { repository, client } = setup();
     client.auth.getSession.mockResolvedValue({ data: { session }, error: null } as never);
-    await repository.saveTransaction(expense);
+    await repository.saveTransaction(expense, requestId);
     expect(client.auth.signInWithPassword).not.toHaveBeenCalled();
     client.auth.getUser.mockResolvedValue({ data: { user: { id: "another-synthetic-user" } }, error: null });
     client.from.mockClear();
-    await expect(repository.saveTransaction(expense)).rejects.toMatchObject({ code: "session" });
+    await expect(repository.saveTransaction(expense, requestId)).rejects.toMatchObject({ code: "session" });
     expect(client.from).not.toHaveBeenCalled();
   });
   it("rejects missing configuration and privileged keys", () => {
@@ -69,18 +94,43 @@ describe("Supabase transaction persistence", () => {
     env.SUPABASE_ANON_KEY = `e30.${Buffer.from(JSON.stringify({ role: "service_role" })).toString("base64url")}.synthetic`;
     expect(() => readSupabaseConfig(env)).toThrow(PersistenceError);
   });
+  it.each(["USD", "eur", "", undefined])("rejects unsupported account currency %s", currency => {
+    const rows = [{ ...accounts[0], currency }] as AccountRow[];
+    expect(() => mapTransaction(expense, user, rows)).toThrowError(new PersistenceError("currency"));
+    expect(() => mapTransaction({ ...expense, type: "income", category: "salary" }, user, rows)).toThrowError(new PersistenceError("currency"));
+    expect(() => mapTransaction({ type: "transfer", amount: 1, date: expense.date, fromAccount: "isybank", toAccount: "revolut" }, user, [accounts[1], ...rows])).toThrowError(new PersistenceError("currency"));
+  });
+  it("propagates currency rejection from atomic resolution without insertion", async () => {
+    const { repository, insertQuery } = setup({ rows: [{ ...accounts[0], currency: "USD" }] });
+    await expect(repository.saveTransaction(expense, requestId)).rejects.toMatchObject({ code: "currency" });
+    expect(insertQuery.insert).not.toHaveBeenCalled();
+  });
+  it("explains EUR errors without exposing server details", () => {
+    expect(persistenceMessage(new PersistenceError("currency"))).toContain("soltanto conti in EUR");
+  });
+  it.each([NaN, Infinity, -Infinity, -1, 0.001])("rejects invalid amount before RPC %s", async amount => {
+    const { repository, client } = setup();
+    await expect(repository.saveTransaction({ ...expense, amount }, requestId)).rejects.toMatchObject({ code: "mapping" });
+    expect(client.rpc).not.toHaveBeenCalled();
+  });
+  it.each(["infinity", "-infinity", "2026-02-30"])("rejects invalid date before RPC %s", async date => {
+    const { repository, client } = setup();
+    await expect(repository.saveTransaction({ ...expense, date }, requestId)).rejects.toMatchObject({ code: "mapping" });
+    expect(client.rpc).not.toHaveBeenCalled();
+  });
   it("rejects missing, inactive, foreign or ambiguous accounts", () => {
     for (const rows of [[], [{ ...accounts[0], is_active: false }], [{ ...accounts[0], user_id: "foreign-user" }], [accounts[0], accounts[0]]]) {
       expect(() => mapTransaction(expense, user, rows)).toThrow(PersistenceError);
     }
   });
-  it.each([{ ...expense, amount: 0 }, { ...expense, date: "2026-02-30" }, { ...expense, category: "salary" }, { ...expense, type: null }, { type: "transfer", amount: 12.5, date: expense.date, fromAccount: "revolut", toAccount: "revolut" }])("rejects invalid mapping %s", transaction => {
+  it.each([{ ...expense, amount: 0 }, { ...expense, amount: 0.001 }, { ...expense, amount: 0.1 + 0.2 }, { ...expense, amount: Infinity }, { ...expense, date: "2026-02-30" }, { ...expense, category: "salary" }, { ...expense, type: null }, { type: "transfer", amount: 12.5, date: expense.date, fromAccount: "revolut", toAccount: "revolut" }])("rejects invalid mapping %s", transaction => {
     expect(() => mapTransaction(transaction as TransactionDraft, user, accounts)).toThrow(PersistenceError);
   });
 });
 
 const config = { allowedChatId: "123456" };
-const message = (text: string) => ({ update_id: 1, message: { message_id: 1, text, chat: { id: 123456, type: "private" } } });
+let messageVersion = 0;
+const message = (text: string) => ({ update_id: ++messageVersion, message: { message_id: 1, text, chat: { id: 123456, type: "private" } } });
 const callback = (flow: ProposalFlow, action: string) => {
   const p = flow.store.get(123456)!;
   return { update_id: 2, callback_query: { id: "synthetic-query", from: { id: 123456 }, data: `p:${p.id}:${p.revision}:${action}`, message: { message_id: 2, chat: { id: 123456, type: "private" } } } };
@@ -88,9 +138,9 @@ const callback = (flow: ProposalFlow, action: string) => {
 describe("confirmation persistence boundary", () => {
   it("does not save preview, edits or cancellation; confirms only once including concurrent clicks", async () => {
     const flow = new ProposalFlow();
-    const client = { call: vi.fn().mockResolvedValue(true), sendMessage: vi.fn().mockResolvedValue(undefined) };
+    const client = { call: vi.fn().mockImplementation(async (method: string) => { if (method === 'editMessageText') throw new Error('synthetic edit unavailable'); return true; }), sendMessage: vi.fn().mockResolvedValue(undefined) };
     let finish!: (result: { id: string }) => void;
-    const repository = { saveTransaction: vi.fn(() => new Promise<{ id: string }>(resolve => { finish = resolve; })) };
+    const repository = { getTransactionReceipt: vi.fn().mockResolvedValue(null), saveTransaction: vi.fn(() => new Promise<{ id: string }>(resolve => { finish = resolve; })) };
     const deliver = (update: unknown) => deliverUpdate(flow, client, update, config, undefined, repository);
     try {
       await deliver(message("12,50 tabacco"));
@@ -116,8 +166,8 @@ describe("confirmation persistence boundary", () => {
   });
   it("keeps a successful insert closed even if Telegram success delivery fails", async () => {
     const flow = new ProposalFlow();
-    const client = { call: vi.fn().mockResolvedValue(true), sendMessage: vi.fn().mockResolvedValue(undefined) };
-    const repository = { saveTransaction: vi.fn().mockResolvedValue({ id: "synthetic-transaction" }) };
+    const client = { call: vi.fn().mockImplementation(async (method: string) => { if (method === 'editMessageText') throw new Error('synthetic edit unavailable'); return true; }), sendMessage: vi.fn().mockResolvedValue(undefined) };
+    const repository = { getTransactionReceipt: vi.fn().mockResolvedValue(null), saveTransaction: vi.fn().mockResolvedValue({ id: "synthetic-transaction" }) };
     try {
       await deliverUpdate(flow, client, message("12 tabacco"), config, undefined, repository);
       const confirm = callback(flow, "confirm");
@@ -130,8 +180,8 @@ describe("confirmation persistence boundary", () => {
   });
   it.each(["authentication", "account_missing", "insert", "constraint", "rls"] as const)("retains proposal without false success after %s", async code => {
     const flow = new ProposalFlow();
-    const client = { call: vi.fn().mockResolvedValue(true), sendMessage: vi.fn().mockResolvedValue(undefined) };
-    const repository = { saveTransaction: vi.fn().mockRejectedValue(new PersistenceError(code)) };
+    const client = { call: vi.fn().mockImplementation(async (method: string) => { if (method === 'editMessageText') throw new Error('synthetic edit unavailable'); return true; }), sendMessage: vi.fn().mockResolvedValue(undefined) };
+    const repository = { getTransactionReceipt: vi.fn().mockResolvedValue(null), saveTransaction: vi.fn().mockRejectedValue(new PersistenceError(code)) };
     const log = vi.spyOn(console, "error").mockImplementation(() => {});
     try {
       await deliverUpdate(flow, client, message("12 tabacco"), config, undefined, repository);
@@ -144,5 +194,53 @@ describe("confirmation persistence boundary", () => {
       expect(flow.store.get(123456)).toBeUndefined();
       expect(client.sendMessage.mock.calls.at(-1)?.[1]).toContain("Transazione registrata");
     } finally { flow.store.clear(); }
+  });
+});
+
+
+describe("cash UUID persistence", () => {
+  it("fails safely for missing, inactive, foreign or duplicate Contanti accounts", async () => {
+    for (const rows of [accounts.slice(0, 2), [{ ...accounts[2], is_active: false }], [{ ...accounts[2], user_id: "foreign-user" }], [accounts[2], accounts[2]]]) {
+      const { repository, insertQuery } = setup({ rows });
+      await expect(repository.saveTransaction({ ...expense, account: "contanti" }, requestId)).rejects.toMatchObject({ code: "account_missing" });
+      expect(insertQuery.insert).not.toHaveBeenCalled();
+    }
+  });
+
+  it.each([
+    ["12,50 pranzo in contanti", "expense", accounts[2].id, null, "food"],
+    ["12,50 stipendio cash", "income", null, accounts[2].id, "salary"],
+    ["12,50 da revolut a contanti stipendio", "transfer", accounts[0].id, accounts[2].id, null],
+    ["12,50 da liquidi a isybank spesa", "transfer", accounts[2].id, accounts[1].id, null],
+  ])("saves %s only after confirmation, using the resolved UUID", async (text, type, from, to, category) => {
+    const flow = new ProposalFlow();
+    const client = { call: vi.fn().mockImplementation(async (method: string) => { if (method === 'editMessageText') throw new Error('synthetic edit unavailable'); return true; }), sendMessage: vi.fn().mockResolvedValue(undefined) };
+    const { repository, insertQuery, client: databaseClient } = setup();
+    try {
+      await deliverUpdate(flow, client, message(text), config, undefined, repository);
+      expect(client.sendMessage.mock.calls[0][1]).toContain("Contanti");
+      expect(insertQuery.insert).not.toHaveBeenCalled();
+      await deliverUpdate(flow, client, callback(flow, "confirm"), config, undefined, repository);
+      const payload = insertQuery.insert.mock.calls[0][0];
+      expect(payload).toMatchObject({ type, user_id: user, from_account_id: from, to_account_id: to, category });
+      expect(payload).not.toHaveProperty("description");
+      expect(databaseClient.from).not.toHaveBeenCalled();
+      expect(databaseClient.rpc).toHaveBeenCalledWith("save_transaction_once", expect.objectContaining({ p_request_id: expect.any(String) }));
+      expect(flow.store.get(123456)).toBeUndefined();
+    } finally { flow.store.clear(); }
+  });
+});
+
+describe("accounting day through Telegram and persistence", () => {
+  it.each([["Europe/Rome", "2026-07-10"], ["UTC", "2026-07-09"]])("preserves configured %s date without UTC shifting", async (timeZone, expectedDate) => {
+    const flow = new ProposalFlow();
+    const client = { call: vi.fn().mockImplementation(async (method: string) => { if (method === 'editMessageText') throw new Error('synthetic edit unavailable'); return true; }), sendMessage: vi.fn().mockResolvedValue(undefined) };
+    const { repository, client: db } = setup();
+    const appConfig = { ...config, messageConfig: { timeZone, defaultAccount: "revolut" as const } };
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-09T22:05:00Z"));
+    await deliverUpdate(flow, client, message("12 pranzo oggi revolut"), appConfig, undefined, repository);
+    await deliverUpdate(flow, client, callback(flow, "confirm"), appConfig, undefined, repository);
+    expect(db.rpc).toHaveBeenCalledWith("save_transaction_once", expect.objectContaining({ p_date: expectedDate }));
   });
 });

@@ -10,6 +10,9 @@ describe("configuration", () => {
   it("supports configured defaults", () => {
     expect(readBotConfig({ ...env, APP_TIMEZONE: "UTC", DEFAULT_ACCOUNT: "isybank" })).toMatchObject({ timeZone: "UTC", defaultAccount: "isybank" });
   });
+  it("supports Contanti as the configured default", () => {
+    expect(readBotConfig({ ...env, DEFAULT_ACCOUNT: "contanti" })).toMatchObject({ defaultAccount: "contanti" });
+  });
   it.each([
     ["TELEGRAM_BOT_TOKEN", undefined], ["TELEGRAM_BOT_TOKEN", "private-invalid-token"],
     ["TELEGRAM_ALLOWED_CHAT_ID", undefined], ["TELEGRAM_ALLOWED_CHAT_ID", "-123"],

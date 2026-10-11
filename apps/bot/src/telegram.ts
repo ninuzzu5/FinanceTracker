@@ -1,9 +1,8 @@
+import { commandName, telegramCommands } from "./commands.js";
 import { timingSafeEqual } from "node:crypto";
-import { categoryLabels, transactionTypeLabels } from "@finance-tracker/domain";
+import { accountLabels, categoryLabels, transactionTypeLabels } from "@finance-tracker/domain";
 import { processMessage, type ProcessMessageResult } from "./process-message.js";
 import { readMessageConfig, type MessageConfig } from "./config.js";
-
-const accountLabels = { revolut: "Revolut", isybank: "Isybank" } as const;
 
 export interface TelegramMessage {
   message_id: number;
@@ -79,13 +78,13 @@ export function decideUpdate(
   }
 
   const chatId = message.chat.id as number;
-  const command = /^\/(start|help)(?:@niuzzu_bot)?(?:\s|$)/i.exec(message.text.trim());
-  if (command) {
+  const command = commandName(message.text);
+  if (command === "start" || command === "help") {
     const { defaultAccount } = config.messageConfig ?? readMessageConfig();
     return {
       kind: "help", chatId,
       reply: [
-        command[1].toLowerCase() === "start" ? "Eccoti, bro 👋" : "Promemoria al volo, bro 👇",
+        command === "start" ? "FinanceTracker" : "Guida FinanceTracker",
         "",
         "Scrivimi importo e due parole, al resto ci penso io:",
         "• 8,30 tabacco",
@@ -93,12 +92,15 @@ export function decideUpdate(
         "• 20 benzina isybank",
         "• mercoledì barbiere 34€ isybank",
         "• 100 da revolut a isybank",
+        "• 12 pranzo in contanti",
+        "• 100 da revolut a contanti",
         "",
         `Senza data uso oggi; per entrate/uscite senza conto uso ${accountLabels[defaultAccount]}. Per i trasferimenti scrivi entrambi i conti.`,
-        "Con /start o /menu scegli Nuovo movimento o Trasferimento e ti guido passo passo.",
+        ...telegramCommands.map(c => `/${c.command} — ${c.description}`),
         "Con /cancel annulli la compilazione o proposta attiva. /menu la chiude e riparte dal menu.",
+        "Con /riconcilia dichiari il saldo Contanti a fine giornata; la conferma chiude il giorno ai movimenti retroattivi.",
         "Con /help ritrovi questi esempi senza interrompere il flusso.",
-        "Se modifichi un messaggio, ti mando una nuova anteprima.",
+        "Puoi modificare la fonte prima del salvataggio. Una fonte già contabilizzata non crea una nuova anteprima.",
         "Provo a riconoscere tipo e categoria; se ho dubbi, li lascio da confermare.",
         "Sotto l'anteprima trovi Conferma, Modifica e Annulla. Completa i campi richiesti prima di confermare.",
         "",
@@ -115,15 +117,15 @@ export function decideUpdate(
       chatId,
       reason: result.reason,
       reply: result.reason === "same_transfer_accounts"
-        ? "Bro, conto di origine e destinazione devono essere diversi. Prova: 100 da revolut a isybank"
+        ? "conto di origine e destinazione devono essere diversi. Prova: 100 da revolut a isybank"
         : result.reason === "incomplete_transfer"
-          ? "Bro, indica entrambi i conti del trasferimento: da <conto> a <conto>. Per esempio: 100 da revolut a isybank. Non posso scegliere il conto mancante."
+          ? "indica entrambi i conti del trasferimento, un solo conto di origine e un solo conto di destinazione: da <conto> a <conto>. Per esempio: 100 da revolut a isybank. Non posso scegliere conti mancanti o ambigui."
         : result.reason === "invalid_or_ambiguous_date"
-        ? "Bro, questa data non è valida oppure ne vedo più di una 👀\nScrivine una sola, per esempio: 10 settembre 2026 tabacco 12€"
+        ? "questa data non è valida oppure ne vedo più di una\nScrivine una sola, per esempio: 10 settembre 2026 tabacco 12€"
         : result.reason === "ambiguous_account"
-          ? "Bro, qui vedo sia Revolut sia Isybank 👀\nIndicami un solo conto, per esempio: 12€ tabacco isybank"
+          ? "qui vedo più conti\nIndicami un solo conto, per esempio: 12€ tabacco isybank"
           : [
-            "Bro, qui manca un importo valido oppure ne vedo più di uno 👀",
+            "qui manca un importo valido oppure ne vedo più di uno",
             "",
             "Scrivimelo così: 8,30 tabacco",
             "Va bene anche: ieri 12,50 spesa",

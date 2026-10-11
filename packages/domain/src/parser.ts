@@ -1,11 +1,22 @@
 import type { AccountId, ParsedMessage } from "./types.js";
 import { extractDate, stripDateExpressions } from "./dates.js";
+import { mentionedAccounts } from "./accounts.js";
 import { extractTransfer } from "./transfers.js";
 
 export { extractDate } from "./dates.js";
 
-// Consume whole numeric tokens, including invalid precision/signs, never substrings.
-const AMOUNT_PATTERN = /(?<![\p{L}\p{N}_.,/+−-])(?:€\s*|eur\s*)?([+−-]?\d+(?:[.,]\d+)*)(?:\s*(?:€|eur))?(?![\p{L}\p{N}_.,/+−-])/gu;
+// Consume the entire monetary token before validation, including signs around currency.
+// Include common Unicode minus/dash forms so none can expose a positive substring.
+const MONEY_SIGNS = String.raw`+\u2212\u2010-\u2015\uFE63\uFF0D\u207B\u208B\u2796\u00B1-`;
+const sign = String.raw`[${MONEY_SIGNS}][\uFE0E\uFE0F]?`;
+const AMOUNT_PATTERN = new RegExp(
+  String.raw`(?<![\p{L}\p{N}_.,/${MONEY_SIGNS}\uFE0E\uFE0F])` +
+  String.raw`(?<prefix>(?:${sign}\s*)*(?:(?:€|eur)\s*(?:${sign}\s*)*)?)` +
+  String.raw`(?<value>\d+(?:[.,]\d+)*)` +
+  String.raw`(?<suffix>(?:\s*(?:€|eur))?(?:\s*${sign})*)` +
+  String.raw`(?![\p{L}\p{N}_.,/${MONEY_SIGNS}\uFE0E\uFE0F])`, "gu",
+);
+const SIGN_PATTERN = new RegExp(`[${MONEY_SIGNS}]`, "u");
 
 export interface ParseOptions {
   now?: Date;
@@ -25,8 +36,10 @@ export function normalizeText(input: string): string {
 
 export function extractAmount(normalizedText: string): number | null {
   const matches = [...stripDateExpressions(normalizedText).matchAll(AMOUNT_PATTERN)];
-  if (matches.length !== 1 || !/^\d{1,7}(?:[.,]\d{1,2})?$/.test(matches[0][1])) return null;
-  const amount = Number(matches[0][1].replace(",", "."));
+  if (matches.length !== 1) return null;
+  const { prefix, value, suffix } = matches[0].groups!;
+  if (SIGN_PATTERN.test(prefix + suffix) || !/^\d{1,7}(?:[.,]\d{1,2})?$/.test(value)) return null;
+  const amount = Number(value.replace(",", "."));
   return Number.isFinite(amount) && amount > 0 ? amount : null;
 }
 
@@ -45,12 +58,8 @@ export function extractAccount(
   normalizedText: string,
   defaultAccount: AccountId = "revolut",
 ): AccountId | null {
-  const isybank = /(?<![\p{L}\p{N}_])(?:isybank|isy(?:\s+bank)?)(?![\p{L}\p{N}_])/u.test(normalizedText);
-  const revolut = /(?<![\p{L}\p{N}_])revolut(?![\p{L}\p{N}_])/u.test(normalizedText);
-  if (isybank && revolut) return null;
-  if (isybank) return "isybank";
-  if (revolut) return "revolut";
-  return defaultAccount;
+  const accounts = mentionedAccounts(normalizedText);
+  return accounts.length > 1 ? null : accounts[0] ?? defaultAccount;
 }
 
 export function parseMessage(input: string, options: ParseOptions = {}): ParsedMessage {

@@ -41,3 +41,38 @@ describe("personal account transfers", () => {
     expect(classifyMessage("50 regalo da Marco")).toMatchObject({ type: "income", category: "gifts" });
   });
 });
+
+
+describe("cash transfer routes", () => {
+  it.each(["contanti", "cash", "liquidi"])("recognizes %s in both directions and keeps transfer classification", alias => {
+    for (const bank of ["revolut", "isybank"]) {
+      expect(parseMessage(`ieri 100 da ${bank} a ${alias} stipendio`, options)).toMatchObject({ type: "transfer", fromAccount: bank, toAccount: "contanti", amount: 100, date: "2026-09-17" });
+      expect(parseMessage(`100 da ${alias} a ${bank} spesa`, options)).toMatchObject({ type: "transfer", fromAccount: "contanti", toAccount: bank });
+      expect(classifyMessage(`100 da ${bank} a ${alias} stipendio`)).toMatchObject({ type: "transfer", category: null });
+      expect(classifyMessage(`100 da ${alias} a ${bank} spesa`)).toMatchObject({ type: "transfer", category: null });
+    }
+  });
+  it("does not infer a missing counterparty or accept repeated routes", () => {
+    expect(parseMessage("100 da cash", options)).toMatchObject({ type: "transfer", fromAccount: "contanti", toAccount: null });
+    expect(parseMessage("100 a liquidi", options)).toMatchObject({ type: "transfer", fromAccount: null, toAccount: "contanti" });
+    expect(parseMessage("100 da cash a contanti", options)).toMatchObject({ type: "transfer", fromAccount: "contanti", toAccount: "contanti" });
+    expect(parseMessage("100 da cash a revolut da liquidi a isybank", options)).toMatchObject({ type: "transfer", fromAccount: null, toAccount: null });
+  });
+});
+
+describe("B5 — extra account mentions", () => {
+  it.each([
+    "12 da contanti a revolut e isybank", "20 da revolut a isybank o contanti",
+    "12 da cash a revolut e isy", "20 da revolut a isy bank o liquidi",
+    "12 da liquidi a revolut, isybank", "12 isybank da contanti a revolut",
+    "12 da contanti a revolut (isybank)", "12 da cash a revolut o liquidi",
+    "12 da revolut a isybank oppure revolut", "12 da cash revolut",
+  ])("requires clarification for %s", text => {
+    expect(parseMessage(text, options)).toMatchObject({ type: "transfer", fromAccount: null, toAccount: null });
+    expect(classifyMessage(text)).toMatchObject({ type: "transfer", category: null, source: "unknown" });
+  });
+  it.each(["cash", "liquidi", "contanti"])("keeps unambiguous routes using %s", alias => {
+    expect(parseMessage(`12 da ${alias} a revolut stipendio`, options)).toMatchObject({ type: "transfer", fromAccount: "contanti", toAccount: "revolut" });
+    expect(parseMessage(`20 da isy bank a ${alias} spesa`, options)).toMatchObject({ type: "transfer", fromAccount: "isybank", toAccount: "contanti" });
+  });
+});

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseMessage } from "../src/index.js";
+import { parseMessage, parseAmountInput } from "../src/index.js";
 
 const now = new Date("2026-09-18T12:00:00Z");
 
@@ -135,5 +135,79 @@ describe("amounts and accounts", () => {
     expect(parseMessage("12 spesa revolut", { now, defaultAccount: "isybank" }).account).toBe("revolut");
     expect(parseMessage("12 spesa isybanker", { now, defaultAccount: "revolut" }).account).toBe("revolut");
     expect(parseMessage("12 revolut isybank", { now }).account).toBeNull();
+  });
+});
+
+
+describe("cash account aliases", () => {
+  it.each(["contanti", "cash", "in contanti", "liquidi", "CONTANTI", "Cash"])("recognizes %s", alias => {
+    expect(parseMessage(`ieri 12 pranzo ${alias}`, { now })).toMatchObject({ account: "contanti", amount: 12, date: "2026-09-17", type: null });
+  });
+  it.each(["cashback", "contantissimo", "liquidità", "cash_foo"])("does not match substrings in %s", alias => {
+    expect(parseMessage(`12 pranzo ${alias}`, { now }).account).toBe("revolut");
+  });
+  it.each(["contanti revolut", "isybank cash", "cash contanti revolut"])("rejects multiple distinct accounts in %s", accounts => {
+    expect(parseMessage(`12 pranzo ${accounts}`, { now }).account).toBeNull();
+  });
+  it("deduplicates aliases of the same account and supports Contanti as default", () => {
+    expect(parseMessage("12 pranzo contanti cash liquidi", { now }).account).toBe("contanti");
+    expect(parseMessage("12 pranzo", { now, defaultAccount: "contanti" }).account).toBe("contanti");
+    expect(parseMessage("12 pranzo isybank", { now, defaultAccount: "contanti" }).account).toBe("isybank");
+  });
+});
+
+// Calendar dates are local accounting days; timestamps remain instants in UTC.
+describe("Rome midnight and DST boundaries", () => {
+  it.each([
+    ["2026-07-09T21:59:59Z", "2026-07-09"],
+    ["2026-07-09T22:00:00Z", "2026-07-10"],
+    ["2026-01-09T22:59:59Z", "2026-01-09"],
+    ["2026-01-09T23:00:00Z", "2026-01-10"],
+    ["2026-03-28T23:30:00Z", "2026-03-29"],
+    ["2026-03-29T00:59:59Z", "2026-03-29"],
+    ["2026-03-29T01:00:00Z", "2026-03-29"],
+    ["2026-10-25T00:30:00Z", "2026-10-25"],
+    ["2026-10-25T01:30:00Z", "2026-10-25"],
+  ])("uses the local day at %s", (instant, expected) => {
+    expect(parseMessage("12 pranzo oggi", { now: new Date(instant), timeZone: "Europe/Rome" }).date).toBe(expected);
+    expect(parseMessage("12 pranzo", { now: new Date(instant), timeZone: "Europe/Rome" }).date).toBe(expected);
+  });
+  it.each([
+    ["2026-10-09T17:08:00Z", "19:08"],
+    ["2026-01-09T17:08:00Z", "18:08"],
+    ["2026-03-29T00:59:00Z", "01:59"],
+    ["2026-03-29T01:00:00Z", "03:00"],
+    ["2026-10-25T00:30:00Z", "02:30"],
+    ["2026-10-25T01:30:00Z", "02:30"],
+  ])("interprets UTC timestamp %s without changing the stored instant", (instant, display) => {
+    const date = new Date(instant);
+    expect(new Intl.DateTimeFormat("it-IT", { timeZone: "Europe/Rome", hour: "2-digit", minute: "2-digit" }).format(date)).toBe(display);
+    expect(date.toISOString()).toBe(instant.replace("Z", ".000Z"));
+  });
+});
+
+describe("B4 — whole signed monetary expressions", () => {
+  it.each(["-€12 spesa revolut", "−€12 spesa revolut", "- EUR 12 spesa revolut", "–12 spesa revolut"])("rejects the reported input %s", input => {
+    expect(parseMessage(input, { now }).amount).toBeNull();
+  });
+  it("rejects Unicode signs, spaces and placements without extracting a positive substring", () => {
+    for (const sign of ["-", "−", "‐", "‑", "‒", "–", "—", "―", "﹣", "－", "⁻", "₋", "➖", "➖️"]) {
+      for (const value of [`${sign}12`, `${sign} 12`, `${sign}€12`, `${sign} € 12`, `€${sign}12`, `€ ${sign} 12`, `${sign} EUR 12`, `EUR ${sign} 12`, `${sign}12€`, `${sign} 12 EUR`, `12€ ${sign}`, `12 ${sign}`]) {
+        expect(parseAmountInput(value), value).toBeNull();
+        for (const text of [`${value} spesa revolut`, `${value} stipendio cash`, `${value} da liquidi a isybank`, `ieri ${value} spesa`, `${value} spesa 10/09/2026`]) {
+          expect(parseMessage(text, { now }).amount, text).toBeNull();
+        }
+      }
+    }
+  });
+  it.each(["- € 12 spesa 5", "- EUR 12 stipendio 5", "€ - 12 e 5", "− € − 12 spesa", "–12,345 spesa", "+ € 12 spesa"])("does not fall back to another amount in %s", input => {
+    expect(parseMessage(input, { now }).amount).toBeNull();
+  });
+  it.each(["€12", "€ 12,50", "12€", "12,50 €", "EUR 12", "12 EUR"])("preserves unsigned currency expression %s", value => {
+    const expected = value.includes("50") ? 12.5 : 12;
+    expect(parseAmountInput(value)).toBe(expected);
+    expect(parseMessage(`${value} pranzo revolut`, { now }).amount).toBe(expected);
+    expect(parseMessage(`${value} stipendio cash`, { now }).amount).toBe(expected);
+    expect(parseMessage(`${value} da cash a isybank`, { now }).amount).toBe(expected);
   });
 });

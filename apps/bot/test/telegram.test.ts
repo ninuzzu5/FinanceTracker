@@ -152,3 +152,30 @@ describe("decideUpdate", () => {
     });
   });
 });
+
+
+describe("cash Telegram preview", () => {
+  it.each(["12 pranzo contanti", "100 stipendio cash"])("shows the cash label for %s", text => {
+    const result = decideUpdate(messageUpdate(text), config);
+    expect(result).toMatchObject({ kind: "preview", transaction: { account: "contanti" } });
+    if (result.kind !== "preview") throw new Error("Expected preview");
+    expect(result.reply).toContain("🏦 Contanti");
+    expect(result.transaction).not.toHaveProperty("description");
+  });
+  it.each(["100 da revolut a cash", "100 da liquidi a isybank"])("previews a cash transfer for %s", text => {
+    const result = decideUpdate(messageUpdate(text), config);
+    expect(result).toMatchObject({ kind: "preview", transaction: { type: "transfer" } });
+    if (result.kind !== "preview") throw new Error("Expected preview");
+    expect(result.reply).toContain("Contanti");
+    expect(result.reply).toContain("Tipo: Trasferimento");
+    expect(result.reply).not.toContain("Categoria:");
+  });
+  it("uses Contanti in help when it is the configured default", () => {
+    const result = decideUpdate(messageUpdate("/help"), { ...config, messageConfig: { timeZone: "Europe/Rome", defaultAccount: "contanti" } });
+    expect(result).toMatchObject({ kind: "help", reply: expect.stringContaining("senza conto uso Contanti") });
+  });
+  it("reports cash ambiguity without naming an unrelated bank", () => {
+    const result = decideUpdate(messageUpdate("12 pranzo cash revolut"), config);
+    expect(result).toMatchObject({ kind: "reject", reason: "ambiguous_account", reply: expect.stringContaining("più conti") });
+  });
+});
