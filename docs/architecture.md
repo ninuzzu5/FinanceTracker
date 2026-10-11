@@ -1,50 +1,54 @@
-# Architecture decisions
+# Architettura attuale
 
-## Bot-first delivery
+Fonte di verità: codice del branch `dev` e migrazioni versionate. La presenza dei file SQL non dimostra che siano applicati sul database remoto. Per l'operatività vedi [guida Telegram](bot-guide.md) e [Supabase](../supabase/README.md).
 
-The Telegram flow is the first end-to-end feature because it provides the lowest-friction input method. The future web application will initially focus on authentication and visualization.
+## Dominio deterministico
 
-## Narrow local classifier
+`packages/domain` separa tipi, conti/alias, categorie/etichette, importi, date, parser e classificazione lessicale. Non usa AI o un modello addestrato. Le regole riconoscono frasi complete, privilegiano evidenze specifiche e lasciano sconosciuti/conflittuali i campi da completare manualmente. La confidenza 0.98 è un punteggio convenzionale, non probabilità statistica.
 
-The application does not use a general-purpose language model. The current deterministic classifier uses a closed set of transaction types and categories; a local model is future work. Amount and date extraction remain deterministic.
+Un movimento ha conto, tipo e categoria; un trasferimento ha origine e destinazione distinte, senza categoria. Il percorso esplicito `da <conto> a <conto>` precede le regole entrata/uscita. Non si inferiscono controparti; menzioni aggiuntive, anche alias fuori dal percorso, richiedono chiarimento. Contanti riconosce cash/liquidi; i nomi delle righe Supabase rimangono Revolut, Isybank e Contanti.
 
-## Failure behavior
+Il parser rifiuta zero, segni anche Unicode attorno alla valuta, più importi, separatori delle migliaia e frazioni di centesimo: non recupera sottostringhe positive né arrotonda. Accetta massimo sette cifre intere e due decimali. Le date sono giorni di calendario in APP_TIMEZONE (default Europe/Rome), non timestamp UTC; date impossibili/ambigue non diventano oggi. La grammatica completa e le categorie sono nella guida.
 
-A prediction below the configured confidence threshold is not stored as if it were certain. The bot presents category buttons and waits for confirmation.
+## Flusso Telegram e quattro milestone UX
 
-## Transfers
+`telegram.ts` autorizza una sola chat privata; `polling.ts`/`local.ts` gestiscono polling e offset in memoria. `apps/bot/api/telegram.ts` espone il webhook con secret, senza coordinamento multiistanza. Entrambi usano `flow-delivery.ts` e `ProposalFlow`.
 
-A transfer proposal uses `type: "transfer"`, `fromAccount` and `toAccount`, without a single `account` or a category. The domain's discriminated draft union separates transfers from expense/income proposals. Both accounts must be explicitly chosen and different before confirmation; changing type rebuilds the draft without incompatible fields. Parsing and manual editing share this representation.
+1. **Menu comandi:** `commands.ts` registra start, menu, movimenti, riconcilia, help e cancel nella chat autorizzata; polling all'avvio, webhook al primo POST autenticato del processo.
+2. **Storico:** `history.ts` e repository leggono cinque transazioni per pagina, più lookahead, ordinando data/UUID decrescenti con cursore. Un trasferimento compare una volta. Le rettifiche non sono transazioni e restano escluse.
+3. **Wizard compatto:** `wizard-state.ts`, `wizard.ts` e viste gestiscono entrata/uscita o trasferimento, navigazione Indietro e campi validati. Il pannello viene aggiornato con editMessageText; un testo libero completo può sostituire il wizard.
+4. **Anteprime:** uno stato attivo per chat; revisione/sessione invalidano callback precedenti. Modifiche della fonte aggiornano l'anteprima; fonti già salvate vengono riconosciute leggendo la ricevuta B1 prima del parsing operativo. Lettura fallita: niente nuova anteprima. Pulizia pulsanti best effort, fallback a nuovo messaggio; ricevute e messaggi utente non vengono cancellati.
 
-Proposals remain in memory until confirmation. Confirmation emits a persistence effect handled by the delivery layer; the repository authenticates a Supabase user, resolves active owned accounts and inserts one transaction. Success closes the proposal before sending the reply. Failure retains it until its normal expiry. Concurrent confirmation clicks are blocked in the current process. Future balance accounting must exclude transfers from income, expense and budget totals; no balance or double-entry implementation exists yet.
+`proposals.ts` conserva menu/wizard/proposal/reconciliation/history con TTL di 30 minuti e timer di rimozione della memoria; la pulizia visiva avviene su attività. Nessun testo grezzo è conservato nello store. Riavvio perde bozze/pannelli/ordinamento delle fonti non salvate. `/help` normale conserva il flusso; una fonte attiva modificata in un comando lo invalida. La conferma produce un effetto di persistenza; solo il successo chiude la proposta. Esiti incerti congelano valori e chiave per il retry.
 
-## Realtime dashboard
+## Persistenza, proprietà e B1
 
-The dashboard and realtime are planned, not implemented. Supabase is the source of truth. In the planned design, when a transaction is committed, an event updates an open dashboard. A dashboard opened later fetches the current state normally; periodic polling is unnecessary.
+`persistence.ts` definisce contratto, validazione/mapping ed errori; `supabase.ts` implementa transazioni, ricevute, storico e riconciliazione. Usa chiave pubblica, signInWithPassword, sessione in memoria e getUser per verificarne il proprietario. Fetch limitato a 15 secondi; niente service role. Configurazione richiesta anche per le letture di storico/ricevute, non solo al salvataggio.
 
-## Supabase 02
+`save_transaction_once` risolve gli UUID dei conti attivi posseduti, verificando nomi univoci ed EUR, e inserisce movimento e ricevuta atomicamente. L'importo validato dal dominio passa alla RPC come stringa decimale esatta. Spesa: from_account_id; entrata: to_account_id; trasferimento: entrambi e categoria NULL. Nessuna operazione presso le banche.
 
-`persistence.ts` defines the repository contract, explicit domain mapping and sanitized errors without importing the Supabase SDK. `supabase.ts` implements the contract with an anonymous public key and password authentication on the same client used for queries. Sessions stay in memory; missing or nearly expired sessions trigger password login, and `getUser` validates ownership before each save. RLS applies to all reads and writes. No service role, schema migrations or account creation are used.
+`operation-key.ts` deriva UUIDv8 opachi da namespace/chat/message_id, non dal contenuto. Il guidato eredita la chiave dal comando iniziale. Retry e replay riusano la chiave; due messaggi identici distinti possono creare due movimenti. Unicità user_id/request_id, lock advisory e payload canonico in 006 impediscono duplicati o riuso con payload diverso. La ricevuta coerente viene restituita prima dei controlli su conti successivamente disattivati o giornate chiuse.
 
-Account names are matched case-insensitively after trimming, only among active accounts owned by the authenticated user. Missing or ambiguous names fail before insertion. Expense uses the source account, income the destination, transfer both distinct accounts and a null category. Description is omitted because proposals do not retain original text.
+RLS e FK di proprietà isolano i dati. Le RPC di scrittura riservate sono SECURITY DEFINER con search_path vuoto, auth.uid e filtri espliciti; le letture sono SECURITY INVOKER. Ricevute immutabili e FK impediscono cancellazioni che riabiliterebbero una chiave. La garanzia presuppone un bot per proprietario e non copre inserimenti diretti o storico senza ricevute. Callback B1 dopo riavvio possono solo leggere una ricevuta, senza reinserire un payload perso.
 
-No automatic insert retry or durable idempotency is implemented. A lost database response may leave an uncertain write; the user must inspect the database before retrying. A successful insert followed by failed Telegram delivery remains persisted. Local single-process polling is the supported workflow; webhook memory does not coordinate multiple instances.
+## Saldi e riconciliazione
 
+004 aggiunge apertura/data nullable con presenza congiunta. Apertura = inizio giornata; intervallo inclusivo da opening_date a p_as_of. `get_account_balances` distingue not_configured/before_opening con saldo NULL da configured. Include conti inattivi e, dopo 005, rettifiche non annullate. Nessun saldo corrente duplicato:
 
-## Account openings and theoretical balances (Milestone 1)
+`apertura + entrate − uscite + trasferimenti ricevuti − inviati + rettifiche`
 
-Migration 004 adds nullable `accounts.opening_balance` / `opening_date`, configured
-manually as a pair. Opening means start of day; the SQL RPC `get_account_balances`
-includes movements from that day through an explicitly supplied date. It calculates
-balances from source transactions, including both transfer directions, without a
-stored running total. Unconfigured accounts and dates before opening yield separate
-statuses and null balances. Inactive owned accounts remain visible.
+Ogni conto usa la propria apertura: un trasferimento compensa il patrimonio solo quando entrambi i lati sono inclusi. Aperture bancarie negative consentite; apertura Contanti non negativa, ma saldo teorico può scendere sotto zero. Numeric SQL esatto; il bot usa stringhe/BigInt per saldi Contanti e formattazione dello storico.
 
-The RPC is invoker-only with explicit owner filtering and RLS. Exact PostgreSQL
-numeric arithmetic and cent precision checks avoid rounding historical rows.
-Persistence validates two-decimal numeric inputs without changing its payload.
-Negative bank openings are allowed; cash openings are nonnegative. Local SQL/RLS
-tests run against disposable embedded PostgreSQL with synthetic Auth fixtures.
-No remote migration, opening seed, cash adjustment, reconciliation, description
-feature or dashboard is introduced. See the Supabase README for preflight and manual
-configuration. There is no bot command for setting or reading openings yet.
+005 introduce account_adjustments e `/riconcilia`: oggi/ieri a fine giornata Europe/Rome, saldo dichiarato non negativo (zero valido), anteprima del teorico/differenza, conferma o annullamento. Apertura mancante impedisce l'operazione. La RPC ricalcola sotto lock, rifiuta anteprime obsolete e registra delta senza entrate/uscite fittizie. Request_id idempotente, unicità della chiusura e lock condivisi proteggono gare con movimenti/trasferimenti; READ COMMITTED richiesto.
+
+Chiusura blocca INSERT/UPDATE/DELETE che coinvolgono Contanti fino a quella data e modifiche contabili del conto riconciliato. Il modello contiene voided_at, ma nessuna API/comando di annullamento o riapertura. Dopo timeout, annullare il flusso non annulla il database; la conversazione di riconciliazione non viene recuperata dopo riavvio.
+
+007 protegge INSERT e UPDATE diretti: importi positivi, finiti, massimo due decimali, date finite; nessun arrotondamento. I CHECK transazioni NOT VALID preservano lo storico senza certificarlo. EUR è vincolo di tutti i conti, anche inattivi: impedisce trasferimenti FX e modifiche incoerenti; non converte dati. Preflight obbligatorio, nessuna riparazione automatica.
+
+## Limiti e sviluppi futuri
+
+Dashboard in `apps/web` non implementata: leggerà Supabase autenticato; niente dataset demo parallelo. Stack web e realtime sono ipotesi, non contratti attuali. created_at/updated_at sono istanti UTC e non compaiono nel bot; una futura UI dovrà formattarli esplicitamente nel fuso desiderato. transaction_date resta una data.
+
+APP_TIMEZONE diverso da Europe/Rome può divergere dalla riconciliazione: uniformare questo contratto in una task dedicata. Mancano gestione aperture via bot, elenco generale saldi, riaperture/correzioni avanzate e storico rettifiche. Stato UX multiistanza, snapshot dello storico e indici per ledger grandi richiedono valutazione separata.
+
+Vitest usa servizi simulati; runner SQL separati applicano migrazioni in database sintetici isolati con RLS/trigger/vincoli attivi. PostgreSQL nativo verifica lock e concorrenza; Auth locale minimo non certifica Auth/JWT, catalogo o rete Supabase remoti.

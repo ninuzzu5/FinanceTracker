@@ -1,9 +1,7 @@
-# Local classifier
+# Classificatore locale — ipotesi futura
 
-The current classifier is deterministic and lives in `packages/domain/src/classification.ts`; taxonomy, aliases and Italian labels are separate domain modules. Explicit personal-account routes identify transfers without a category; lexical rules classify expense/income categories. Unknown or conflicting descriptions remain unconfirmed, without a generic fallback category.
+Il classificatore attuale è deterministico: [classification.ts](../packages/domain/src/classification.ts), con tassonomia, alias ed etichette in moduli distinti del dominio. Percorsi espliciti identificano trasferimenti senza categoria; regole lessicali classificano entrate/uscite. Risultati sconosciuti o conflittuali richiedono scelta manuale e conferma nel bot; nessuna categoria residuale inventata.
 
-No model is implemented or trained in this directory. In a future phase, a small local classifier may run after unknown rule results, using the same type/category taxonomy documented in [the bot guide](../docs/bot-guide.md). Its integration can extend `ClassificationSource` with `model`. Amount, date and account remain the deterministic parser's responsibility. No external AI APIs are used.
+Questa directory non contiene un modello implementato o addestrato. Un eventuale fallback locale potrà consumare risultati unknown ed estendere ClassificationSource, riusando la [tassonomia documentata](../docs/bot-guide.md#classificazione-iniziale-a-regole). Importo, data e conto resteranno responsabilità del parser deterministico; nessuna API AI esterna è usata. È una possibilità da valutare, non una milestone già iniziata.
 
-Only reviewed synthetic examples and safe training code may be committed. This directory collects no personal messages or financial data. The bot separately persists confirmed transactions in the user's Supabase database.
-
-Real transactions and private phrases must remain outside the repository under `model/data/private/`, which is ignored by Git.
+Conservare nel repository soltanto esempi sintetici revisionati e codice sicuro. Frasi private/dataset personali devono restare fuori da Git: model/data/private/ è ignorata, così come gli artefatti da revisionare in model/artifacts/. Il database Supabase conserva separatamente i valori contabili confermati, non un dataset di messaggi Telegram grezzi. Vedi [architettura](../docs/architecture.md) e [sicurezza](../SECURITY.md).

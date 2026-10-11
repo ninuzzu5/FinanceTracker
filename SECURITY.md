@@ -28,10 +28,11 @@ Before publishing, also review author/committer names and email addresses in com
 - Auth credentials come only from private runtime environment variables; the session stays in memory.
 - Webhook requests must pass the Telegram webhook secret check. Local polling checks the private chat allowlist instead.
 - Only explicitly associated Telegram chat IDs may create transactions.
-- Every user-owned database table must use Row Level Security. Account lookups select active owned accounts; transaction inserts include the authenticated user ID, with database constraints enforcing account ownership.
-- Supabase 01 application schema, constraints and RLS policies are versioned in `supabase/migrations/`. Apply both migrations in order to a fresh Supabase database before exposing application access; managed Auth infrastructure and private user/account provisioning are separate prerequisites. Do not replay the baseline on the existing database.
-- Tests use synthetic fixtures and mocked services, without real credentials or financial data.
-- Monetary values are validated before persistence; the classifier never modifies an amount.
+- Every user-owned database table must use Row Level Security. Account lookups select active owned accounts; the atomic save RPC derives the authenticated user ID, with database constraints enforcing account ownership. Receipt and reconciliation write RPCs use SECURITY DEFINER with explicit ownership checks; read RPCs use SECURITY INVOKER and RLS.
+- Schema, RLS, openings, cash closure guards, idempotent receipts and monetary/EUR constraints are versioned in migrations 001–007. Follow [the migration order and preflights](supabase/README.md); 003 is legacy-only. Apply 001/002 only to a fresh database, never replay them on existing tables. Managed Auth and private user/account provisioning are separate prerequisites. Remote alignment is not verified by this documentation review.
+- Application tests mock services; separate SQL/stress runners use disposable local databases and synthetic Auth fixtures, keeping RLS, triggers and constraints enabled. They do not certify hosted Auth or remote schema configuration.
+- Monetary values are validated in the domain and SQL; 007 rejects nonfinite/nonpositive/sub-cent amounts and nonfinite dates on INSERT/UPDATE without rounding. All accounts must be EUR. Historical transaction checks are NOT VALID until separately reviewed/validated. The classifier never modifies an amount.
+- Persistent idempotency applies to the stable operation key through save_transaction_once, not direct SQL/REST inserts or pre-006 history. Do not rotate its namespace or share one owner between multiple bots without a compatibility plan. Closed cash days cannot be reopened through the current application.
 
 ## Reporting
 

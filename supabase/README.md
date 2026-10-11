@@ -1,17 +1,58 @@
 # Supabase
 
-This directory versions the Supabase 01 application schema and ownership policies. Migrations 001 and 002 are a baseline for a fresh Supabase database. Migration 003 is the separate category-constraint correction for an existing database. Migration 004 adds optional account openings and authenticated balance calculation. Migration 005 adds cash reconciliation and protection of closed cash days. No migration has been applied remotely by this task.
+Questa directory descrive lo schema applicativo versionato, non lo stato verificato
+del progetto remoto. Il codice attuale usa aperture/saldi, riconciliazione Contanti,
+ricevute idempotenti e vincoli EUR/monetari delle migrazioni fino a 007.
+Nessuna migrazione è applicata automaticamente dal bot.
 
 ## Migration order
 
-1. `migrations/001_initial_schema.sql` creates `public.accounts` and `public.transactions`, their defaults, primary keys, user foreign keys, account foreign keys, composite ownership foreign keys, and transaction checks.
-2. `migrations/002_rls_policies.sql` explicitly enables RLS on both tables, grants CRUD privileges to the `authenticated` role, and creates separate SELECT, INSERT, UPDATE and DELETE policies for each table.
-3. `migrations/003_enforce_transaction_category.sql` replaces only `transactions_category_by_type_check` in legacy databases where that constraint exists but does not enforce the correct category rule. Skip 003 for fresh databases created with the corrected 001 and for the existing Supabase project: its constraint has already been verified as correct, so no migration is needed.
+| Migrazione | Effetto / prerequisiti | Quando eseguirla |
+| --- | --- | --- |
+| [001](migrations/001_initial_schema.sql) | accounts/transactions, FK di proprietà, direzioni e categorie; richiede Auth Supabase | Solo provisioning di database nuovo, una volta |
+| [002](migrations/002_rls_policies.sql) | RLS, grant e policy CRUD proprie; richiede 001 | Subito dopo 001, prima di esporre accesso applicativo, una volta |
+| [003](migrations/003_enforce_transaction_category.sql) | Sostituisce il CHECK categorie legacy e valida lo storico | Solo se il CHECK esistente è scorretto, dopo preflight; saltare con la 001 attuale |
+| [004](migrations/004_account_openings_and_balances.sql) | Apertura/data nullable congiunte e get_account_balances | Schema/FK/categorie/RLS coerenti con 001/002; 003 non è prerequisito numerico |
+| [005](migrations/005_cash_reconciliation.sql) | account_adjustments, RPC e lock/trigger di chiusura Contanti; integra rettifiche nei saldi | Dopo 004, verificando firma RPC e vincoli di apertura |
+| [006](migrations/006_transaction_idempotency.sql) | transaction_receipts, save_transaction_once e get_transaction_receipt | Dopo 005, con RLS attiva e oggetti 006 assenti |
+| [007](migrations/007_monetary_integrity_and_eur.sql) | CHECK importi/date, EUR per tutti i conti, controllo EUR nella RPC B1 | Dopo 006 e [preflight READ ONLY](preflight/007_monetary_integrity_and_eur.sql) |
 
-4. `migrations/004_account_openings_and_balances.sql` incrementally adds nullable opening fields and `get_account_balances(date)`. It needs the existing accounts/transactions schema and RLS, not legacy migration 003.
-5. `migrations/005_cash_reconciliation.sql` requires 004 and adds separate adjustment records, authenticated reconciliation RPCs and closure guards.
+**Database nuovo:** 001 → 002 → 004 → 005 → 006 → 007. La baseline 001
+include già il CHECK corretto: non eseguire 003 come passaggio obbligatorio.
+**Database esistente:** confronta catalogo, policy, grant e vincoli; applica soltanto
+i passaggi mancanti, nell'ordine dipendente. Non dedurre applicazione dal nome dei
+file o dal branch. Non rilanciare 001/002 e non rieseguire 003 se già corretto.
+Anche 004–007 vanno applicate una volta: non sono script di reset/riparazione
+idempotenti; 007 sostituisce una RPC ma aggiunge vincoli senza IF NOT EXISTS.
 
-Apply the baseline files 001 and 002 once, in order, as part of provisioning a new database, before exposing application access. They intentionally fail if the tables or policies already exist. Each file is transactional. Do not replay this baseline against the existing Supabase project; reconciling an existing database with migration history is separate work.
+Tutti i file sono transazionali: provare su un progetto di test separato, fermare
+le scritture durante DDL, incollare **l'intero file** BEGIN/COMMIT inclusi nel SQL
+Editor con amministratore fidato. In caso di errore fare ROLLBACK prima di
+riesaminare lo schema. Nessuna transazione storica viene modificata automaticamente.
+Se oggetti o policy differiscono, fermarsi e confrontarli senza DROP correttivi.
+
+### Verifica dopo ciascun passaggio
+
+- 001/002: tabelle, FK composite owner/account, CHECK categorie/direzioni e
+  RLS attiva; CRUD authenticated limitato al proprietario, nessuna policy anon.
+- 003 (solo legacy): definizione transactions_category_by_type_check coerente
+  con 001 e nessuna riga incompatibile con i tipi/categorie.
+- 004: quattro CHECK di apertura e firma get_account_balances(date); coppia
+  NULL restituisce not_configured, date anteriori before_opening, non zero.
+- 005: account_adjustments con RLS e sola lettura diretta authenticated;
+  preview_cash_reconciliation/reconcile_cash, trigger su conti e movimenti,
+  saldo integrato e blocco di giornate chiuse, trasferimenti compresi.
+- 006: ricevute con RLS/sola lettura e immutabilità, FK protetto; RPC con
+  privilegi previsti. Stessa chiave/payload = stesso UUID; payload diverso = PT409.
+- 007: tre nuovi CHECK, EUR validato, quelli transazioni inizialmente NOT VALID;
+  nuove scritture/UPDATE invalidi rifiutati. Verificare anche la RPC B1 sostituita.
+
+Controllare oggetti tramite pg_constraint, pg_policies, pg_class.relrowsecurity,
+pg_proc e privilegi effettivi; le query di preflight nelle sezioni sotto danno
+metadati utili ma non certificano da sole tutta la configurazione remota.
+Se serve aggiornare PostgREST: `NOTIFY pgrst, 'reload schema';`. Verificare le RPC
+con sessione Auth reale del proprietario in un ambiente di test, non con SQL Editor
+amministrativo privo di JWT né con claim sintetici nel progetto personale.
 
 ## Prerequisites and boundaries
 
@@ -19,7 +60,7 @@ The target must already provide Supabase Auth, `auth.users`, `auth.uid()`, the `
 
 No users, accounts, transactions or seeds are inserted. Real Auth users and account rows must be provisioned privately. Revolut, Isybank and Contanti are conceptual account names used by the bot; their UUIDs are resolved from active rows owned by the authenticated user, never hardcoded.
 
-The schema follows the DDL supplied for Supabase 01, with one reviewed correction: the category CHECK explicitly requires `category IS NOT NULL` for expense/income, together with a category valid for that type. For transfers the category must be NULL and the two accounts must be distinct. The column remains nullable to support transfers; `description` also remains nullable. Category identifiers match the domain taxonomy. No other schema or application behavior is changed.
+The initial baseline includes the corrected category constraint: the category CHECK explicitly requires `category IS NOT NULL` for expense/income, together with a category valid for that type. For transfers the category must be NULL and the two accounts must be distinct. The category column remains nullable to support transfers. Category identifiers match the domain taxonomy. The later incremental migrations add the protections documented below; unused baseline columns are not application features.
 
 `created_at` and `updated_at` have insertion defaults only. No automatic timestamp-update trigger is introduced. The policy names in this baseline are descriptive local names; names and grants have not been compared to the remote catalog. The supplied ownership model is preserved: SELECT and DELETE use `USING`, INSERT uses `WITH CHECK`, and UPDATE uses both, preventing changes to another owner's user ID. Composite foreign keys prevent references to another user's accounts. No policy authorizes anonymous users, and RLS is never disabled.
 
@@ -41,15 +82,15 @@ Only for a legacy database with an incorrect `transactions_category_by_type_chec
 
 This task prepares the query and migration only: neither has been executed, and no database credentials are required to review these files. Existing-database migration history reconciliation remains separate work.
 
-## Supabase 02 access
+## Supabase authenticated access
 
-The bot uses `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_USER_EMAIL` and `SUPABASE_USER_PASSWORD`. It signs in as the dedicated Auth user and uses that session for account queries and transaction inserts, subject to RLS. Normal bot access never uses a secret/service-role key.
+The bot uses `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_USER_EMAIL` and `SUPABASE_USER_PASSWORD`. It signs in as the dedicated Auth user and uses that session for history, receipts and RPCs, with RLS and explicit ownership checks. The save RPC resolves UUIDs and atomically creates a transaction and receipt. Normal bot access never uses a secret/service-role key.
 
 Real values stay in the ignored `.env.local` file or private runtime environment. There are no personal UUIDs, credentials, financial records or balances in these migrations.
 
 ## Validation
 
-Normal application tests mock the SDK and never contact the real database. See [the bot guide](../docs/bot-guide.md) for manual application checks. Migration 004 and its balance/RLS assertions are executed in disposable embedded PostgreSQL (PGlite), with a minimal local Supabase Auth contract. Hosted Supabase Auth and the remote catalog are not tested. The SQL runner is separate from the default Vitest suite and CI; it never reads credentials or connects to a remote database.
+Normal application tests mock the SDK and never contact the real database. See [the bot guide](../docs/bot-guide.md) for manual application checks. The SQL runner applies 001/002/004/005/006/007, reruns balance/reconciliation/idempotency suites and tests history and integrity. Its assertions execute in disposable embedded PostgreSQL (PGlite), with a minimal local Supabase Auth contract. Hosted Supabase Auth and the remote catalog are not tested. The SQL runner is separate from the default Vitest suite and CI; it never reads credentials or connects to a remote database.
 
 
 ## Configurazione manuale del conto Contanti
@@ -92,8 +133,8 @@ RLS e vincoli di proprietà restano applicati.
 Questa operazione crea soltanto un conto: non inserire transazioni iniziali o
 saldi inventati. Per configurare un'apertura verificata, segui la sezione Milestone 1. Il bot non crea automaticamente la riga remota.
 
-Riferimenti per l'interfaccia: [inserimento di righe dal Table Editor](https://supabase.com/docs/guides/database/arrays)
-e [utenti Auth nel Dashboard](https://supabase.com/docs/guides/auth/managing-user-data).
+Per i vincoli dei campi consulta la [baseline locale](migrations/001_initial_schema.sql)
+e le migrazioni incrementali indicate sopra.
 
 
 ## Milestone 1: apertura e saldo teorico
@@ -165,15 +206,15 @@ di abilitare il calcolo: nessuna correzione automatica è prevista.
    imposta insieme `opening_balance` e `opening_date`, con importo reale verificato
    per quella data. Se non conosci l'apertura, lascia entrambi NULL. Gli UUID restano
    quelli esistenti. Una modifica successiva dell'apertura ricalcola tutta la serie;
-   tracciamento delle aperture e riconciliazioni sono fuori da questa milestone.
+   non esiste audit dedicato delle modifiche all’apertura. Dopo una riconciliazione 005 protegge l’apertura da modifiche: la riapertura non è implementata.
 
 ### Lettura autenticata
 
 La RPC è `get_account_balances`, con parametro obbligatorio `p_as_of` (`YYYY-MM-DD`).
 Un client Supabase **già autenticato come proprietario** può invocare
 `client.rpc('get_account_balances', { p_as_of: '2026-10-03' })`.
-Il bot continua a inserire movimenti; nessun nuovo comando di apertura o saldo è
-aggiunto in questa milestone. La configurazione delle aperture è manuale.
+Non esiste un comando per configurare aperture o elencare tutti i saldi.
+`/riconcilia` legge il teorico Contanti tramite le RPC 005; le aperture restano manuali.
 
 La funzione è `SECURITY INVOKER`, con search_path vuoto, RLS e filtri espliciti su
 `auth.uid()`. Non accetta un user_id dal client. EXECUTE è concesso solo ad
@@ -189,11 +230,11 @@ Ogni riga contiene `account_id`, `account_name`, `currency`, `is_active`,
 | --- | --- |
 | `not_configured` | NULL: apertura assente, anche in presenza di transazioni |
 | `before_opening` | NULL: data richiesta precedente all'apertura |
-| `configured` | Apertura + entrate − uscite + trasferimenti ricevuti − inviati |
+| `configured` | Apertura + entrate − uscite + trasferimenti ricevuti − inviati + rettifiche non annullate (005) |
 
 Gli intervalli sono inclusivi su entrambe le estremità. I conti inattivi restano
 visibili; un utente senza conti ottiene una lista vuota. Non esiste una colonna di
-saldo corrente. Aggiornare o cancellare un movimento ricalcola le letture successive.
+saldo corrente. Aggiornare o cancellare un movimento ricalcola le letture successive, se l’operazione è permessa: 005 protegge le giornate Contanti chiuse e 006 impedisce cancellazioni di transazioni con ricevuta.
 Ogni lato del trasferimento usa l'apertura del proprio conto: con date diverse un
 trasferimento può ricadere soltanto nell'intervallo di uno dei due conti. La compensazione
 nel patrimonio si verifica quando entrambi i lati sono inclusi.
@@ -203,7 +244,8 @@ La funzione rifiuta importi incompatibili **solo nei movimenti del chiamante inc
 nel calcolo** (errore 22003), senza alterare o arrotondare righe storiche. Il parser
 esistente accetta già al massimo due decimali; la persistenza verifica ora anche
 questo contratto, usando conversione a centesimi sicuri senza moltiplicazione floating
-point. Il payload resta numerico e identico: 0.29 si serializza come 0.29.
+point. Il dominio rappresenta importi limitati come Number validati in centesimi;
+la RPC di salvataggio attuale riceve una stringa decimale esatta, ad esempio "0.29".
 Evita somme monetarie con `Number` nel futuro client: l'aggregazione è responsabilità
 SQL. I trasferimenti tra valute diverse sono rifiutati (22023); non esiste conversione
 FX. Per il patrimonio dei tre conti usa EUR e non sommare valute diverse.
@@ -211,7 +253,7 @@ FX. Per il patrimonio dei tre conti usa EUR e non sommare valute diverse.
 ### Test senza dati reali né aperture arbitrarie
 
 Il runner `tests/run-account-balances.mjs` avvia PostgreSQL in memoria, con una
-simulazione minima di auth.uid/users/ruoli, applica 001, 002 e 004 e verifica anche
+simulazione minima di auth.uid/users/ruoli, applica 001, 002 e 004–007 e verifica anche
 che le transazioni preesistenti rimangano identiche. Non legge `.env`, non contatta
 Supabase e non usa un database su disco. Gli importi sintetici dei test non sono
 valori da trasferire ai conti personali. Nessuna modalità demo/reale è introdotta.
@@ -249,7 +291,7 @@ La verifica locale non certifica il catalogo o l'infrastruttura Auth remoti.
 ## Milestone 2: riconciliazione Contanti
 
 La migrazione `migrations/005_cash_reconciliation.sql` va applicata **dopo 004**.
-Nessuna migrazione di questa task è stata eseguita sul progetto remoto.
+La presenza dei file locali non attesta l’applicazione sul progetto remoto.
 
 ### Controlli e applicazione manuale
 
@@ -335,7 +377,8 @@ sono rifiutati per evitare controlli su chiusure non aggiornate.
 
 Il flusso Telegram usa lo store esistente in memoria, con scadenza di 30 minuti:
 un riavvio perde la conversazione. Il database conserva l'idempotenza e la chiusura,
-ma non c'è ancora un comando per recuperare una ricevuta dopo un riavvio. Le richieste
+ma non esiste recupero Telegram della ricevuta **di riconciliazione** dopo riavvio;
+questo limite non riguarda i pulsanti dei movimenti B1. Le richieste
 HTTP hanno timeout di 15 secondi; un timeout non garantisce rollback sul server.
 Il pulsante di ritentativo mantiene richiesta e chiave; Annulla non cancella scritture
 incerte. La duplicazione rimane impedita dal database anche dopo un riavvio.
@@ -469,22 +512,21 @@ la stessa chiave. Una conferma scaduta, obsoleta o ricevuta dopo riavvio può so
 prima richiesta non ha ancora concluso il commit, il controllo può non trovare
 ancora una ricevuta: ripremi lo stesso pulsante dopo un intervallo.
 
-Il replay del messaggio crea una nuova anteprima con la medesima identità. Se il
-payload corrisponde, la conferma recupera la ricevuta; se differisce (anche perché
-una data relativa è stata reinterpretata un altro giorno), non crea una seconda
-transazione e segnala conflitto. In questo caso il bot tenta anche la lettura della
-ricevuta. Una modifica della fonte già contabilizzata non corregge il movimento
-esistente e non può crearne un secondo con la stessa chiave. Non è implementata
-l'intera UX B6 per ignorare preventivamente tutte le fonti già contabilizzate.
+Il percorso UX attuale legge preventivamente `get_transaction_receipt` prima di
+creare un'anteprima: replay o modifica di una fonte già contabilizzata producono
+solo un avviso, anche dopo riavvio o se il testo diventa un comando. La lettura
+fallita blocca nuove anteprime. La RPC resta la difesa atomica: stessa chiave con
+payload diverso = conflitto, mai una seconda transazione. Modificare la fonte
+non corregge il movimento salvato. L'ordinamento delle fonti non salvate rimane
+in memoria, senza persistenza delle bozze o correzioni retroattive avanzate.
 
 Fuori copertura:
 
 - Transazioni create prima di 006, senza ricevuta associata; inclusi vecchi pulsanti
   che non contengono la chiave. Non modificare/reinviare vecchie fonti per correggere
-  lo storico: B6 completo e recupero dello storico restano attività separate.
+  lo storico: le modifiche/cancellazioni retroattive restano da progettare. `/movimenti` legge lo storico ma non collega vecchie fonti a ricevute mancanti.
 - Inserimenti diretti SQL/REST su transactions che non passano dalla nuova RPC;
-  restano disponibili secondo le policy preesistenti. Nessun altro bug dell'audit
-  viene risolto attraverso questa task.
+  restano disponibili secondo le policy preesistenti. B2/B3 proteggono comunque importi, date e valute anche fuori RPC.
 - Un messaggio nuovo, copia/incolla o inoltro con message_id diverso è una nuova
   operazione: non è possibile distinguerlo automaticamente da una seconda spesa
   legittima identica. In caso di esito incerto usa il vecchio pulsante, non una copia.
@@ -607,8 +649,8 @@ salto primaverile, ora ripetuta autunnale e percorso Telegram→RPC.
 Criticità indipendente confermata dal codice: riconciliazione e relativa UI usano
 Europe/Rome fisso, mentre i movimenti consentono APP_TIMEZONE diverso. La
 configurazione predefinita è coerente; un altro fuso può produrre giornate diverse
-vicino a mezzanotte. Non è modificata in questa task. B4/B5/B6 completo restano
-esclusi.
+vicino a mezzanotte. Non è modificata in questa task. B4/B5 sono corretti nel parser; la UX attuale verifica preventivamente le
+ricevute B1 e invalida le fonti modificate. La divergenza di fuso resta aperta.
 
 ### Test locali
 
@@ -624,3 +666,19 @@ Lo stress nativo esegue le gare Contanti e B1 sullo schema 007, poi 25 sessioni 
 212 scritture invalide rifiutate e 13 trasferimenti concorrenti a centesimi,
 verificando patrimonio invariato. I runtime temporanei non sono dipendenze del
 progetto; socket locale, credenziali sintetiche e cluster eliminato alla fine.
+
+## Storico Telegram e audit aggiornato
+
+`/movimenti` legge transactions con RLS e filtro proprietario, cinque righe più
+lookahead, cursor transaction_date/id decrescente e importo PostgREST `amount::text`.
+Non legge account_adjustments, non consente correzioni/cancellazioni e non richiede
+una migrazione 008. Il test [history.sql](tests/history.sql) verifica cursore, date
+uguali, trasferimento singolo e isolamento tra due proprietari. Nessun indice nuovo
+è introdotto: grandi ledger richiederanno una valutazione prestazionale separata.
+
+Il [report del 9 ottobre](../docs/audit-2026-10-09.md) è storico: i difetti B1–B5
+sono ora coperti da correzioni e test di regressione nel codice attuale. Il runner
+SQL conserva caratterizzazioni B2/B3 **prima di 007**, poi verifica le protezioni
+dopo 007; quelle caratterizzazioni non indicano che il difetto sia ancora presente
+con tutte le migrazioni applicate. La copertura locale non attesta l'allineamento
+remoto, Auth/JWT reale, rete reale o un deployment multiistanza.

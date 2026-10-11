@@ -2,106 +2,85 @@
 
 [![CI](https://github.com/ninuzzu5/FinanceTracker/actions/workflows/ci.yml/badge.svg)](https://github.com/ninuzzu5/FinanceTracker/actions/workflows/ci.yml)
 
-FinanceTracker è un progetto personale per registrare spese, entrate e trasferimenti tramite un bot Telegram. TypeScript e Node.js gestiscono parsing, classificazione deterministica e flusso di conferma; Supabase conserva i movimenti con Auth e Row Level Security (RLS).
+FinanceTracker registra uscite, entrate e trasferimenti tramite Telegram, con parser e classificatore deterministici TypeScript. Supabase conserva movimenti, ricevute idempotenti e rettifiche Contanti; Auth e RLS isolano i proprietari. Nessuna API AI esterna.
 
 ## Stato attuale
 
-Il bot funziona localmente tramite long polling, in una sola istanza e per una chat privata autorizzata. Supporta testo libero e inserimento guidato. La migrazione 004 prepara saldi iniziali e calcolo SQL dei saldi teorici, con configurazione manuale e nessun nuovo comando Telegram. Dashboard, budget, rettifiche, riconciliazioni, statistiche e realtime non sono ancora implementati.
+Implementati sul codice di `dev`:
+
+- Testo libero e wizard per Revolut, Isybank e Contanti, categorie separate per entrate/uscite, anteprima modificabile e conferma esplicita.
+- Quattro milestone UX Telegram: menu dei sei comandi, storico `/movimenti`, wizard compatto sullo stesso pannello e gestione delle anteprime/fonti modificate.
+- Aperture manuali e RPC dei saldi teorici; `/riconcilia` registra rettifiche Contanti a fine giornata e protegge le giornate chiuse.
+- B1: salvataggio atomico e idempotenza persistente per operazione; B2/B3: importi/date validi e conti EUR; B4/B5: rifiuto di importi con segno e trasferimenti ambigui.
+
+Queste funzionalità richiedono lo schema corrispondente alle migrazioni locali fino a 007. **L'allineamento del database remoto non è verificato da questa revisione.** Dashboard, budget, statistiche, realtime, riapertura delle giornate e correzioni retroattive avanzate restano da sviluppare.
 
 ```text
-Messaggio o inserimento guidato
-  → parsing di importo, data e conti
-  → classificazione deterministica
-  → anteprima e modifiche
-  → conferma esplicita
-  → INSERT autenticato in Supabase
-  → risposta di successo
+Testo libero o wizard → parsing/classificazione → anteprima e modifiche
+  → conferma → RPC save_transaction_once → transazione + ricevuta atomiche
+  → conferma Telegram
 ```
 
-**Anteprima, modifica e annullamento non salvano nulla.** Dopo la conferma, il bot comunica il successo solo quando l'INSERT riesce. Le classificazioni sconosciute o ambigue richiedono una scelta manuale; non vengono inventati valori mancanti.
+Prima della conferma non vengono scritti dati finanziari. Annulla chiude la conversazione: dopo un tentativo dal risultato incerto non elimina eventuali scritture riuscite. In caso di timeout usa il pulsante della stessa operazione; un nuovo messaggio è una nuova operazione, anche con valori identici.
 
-Esempi sintetici:
+Esempi: `ieri 12,50 spesa isybank`, `100 stipendio revolut`, `12 pranzo cash`, `50 da revolut a contanti`. Il parser chiede chiarimenti per importi invalidi, date impossibili o conti ambigui; tipo e categoria sconosciuti si completano con Modifica.
 
-- `ieri 12,50 spesa isybank`
-- `100 stipendio revolut`
-- `50 da revolut a isybank`
+## Componenti e documentazione
 
-Con `/start` o `/menu` si apre il flusso guidato; `/help` mostra gli esempi e `/cancel` annulla lo stato corrente. I pulsanti consentono Conferma, Modifica e Annulla. Le proposte scadono dopo 30 minuti e si perdono al riavvio.
+- `packages/domain`: tipi, parser, date, importi, conti, categorie e regole lessicali.
+- `apps/bot`: polling/webhook, stato temporaneo, wizard, viste, storico e repository Supabase.
+- `supabase`: migrazioni 001–007, preflight e test SQL isolati.
+- `apps/web`: solo documentazione; nessuna dashboard o applicazione React attuale.
+- `model`: proposta di eventuale classificatore locale; nessun modello attivo.
 
-## Architettura
-
-- `packages/domain`: parser, classificazione a regole, categorie e tipi condivisi. Nessuna API AI esterna.
-- `apps/bot`: flusso Telegram, proposte temporanee in memoria e repository di persistenza.
-- `supabase`: migration SQL di Supabase 01 per schema, constraint e policy RLS, senza seed o dati personali.
-- `apps/web`: documentazione della dashboard futura, senza applicazione implementata.
-- `model`: documentazione del possibile classificatore locale futuro, senza modello addestrato.
-- `docs`: [decisioni architetturali](docs/architecture.md) e [guida del bot con grammatica e collaudo manuale](docs/bot-guide.md).
-
-Il bot usa una chiave Supabase pubblica anon e le credenziali di un utente Auth dedicato. `signInWithPassword` crea una sessione in memoria sullo stesso client delle query; `getUser` verifica l'utente prima del salvataggio. Le query restano soggette a RLS. La service role non viene utilizzata.
-
-Revolut, Isybank e Contanti sono identificatori logici: il repository risolve gli UUID dai conti attivi dell'utente, senza hardcoding o creazione automatica. Una spesa usa `from_account_id`, un'entrata `to_account_id`, un trasferimento entrambi con conti distinti e categoria NULL. Non vengono spostati fondi presso le banche.
+Consulta [architettura](docs/architecture.md), [guida Telegram e collaudo](docs/bot-guide.md), [configurazione/migrazioni Supabase](supabase/README.md), [audit storico e stato delle correzioni](docs/audit-2026-10-09.md) e [sicurezza](SECURITY.md).
 
 ## Sviluppo locale
 
-Requisito: Node.js 22 o successivo. Dalla root:
+Node.js **22+**, comandi dalla root:
 
 ```bash
 npm ci
+npm run build
 npm run typecheck
 npm test
-npm run build
+npm run bot:dev
 ```
 
-Per avviare il bot, copia `.env.example` in `.env.local` e compila privatamente:
+`bot:dev` compila dominio e bot e avvia il polling; non è un watcher. Per applicare modifiche arresta con Ctrl+C e riavvia. Non esiste uno script `bot:local`.
+
+Crea privatamente `.env.local` da `.env.example`, preservando un file già esistente:
 
 | Variabile | Uso |
 | --- | --- |
 | `TELEGRAM_BOT_TOKEN` | Token del proprio bot |
 | `TELEGRAM_ALLOWED_CHAT_ID` | Chat privata autorizzata |
 | `SUPABASE_URL` | URL del progetto |
-| `SUPABASE_ANON_KEY` | Chiave pubblica anon, mai service role |
-| `SUPABASE_USER_EMAIL` | Email dell'utente Auth dedicato |
-| `SUPABASE_USER_PASSWORD` | Password dello stesso utente |
+| `SUPABASE_ANON_KEY` | Chiave pubblica, mai secret/service role |
+| `SUPABASE_USER_EMAIL`, `SUPABASE_USER_PASSWORD` | Utente Auth dedicato |
 | `APP_TIMEZONE` | Default `Europe/Rome` |
-| `DEFAULT_ACCOUNT` | Default `revolut`, alternative `isybank` e `contanti` |
+| `DEFAULT_ACCOUNT` | `revolut` (default), `isybank` o `contanti` |
 
-`TELEGRAM_WEBHOOK_SECRET` serve soltanto al webhook. Il polling locale carica `.env.local` con il loader nativo di Node; le variabili già presenti nella shell hanno precedenza.
+Il loader nativo Node carica `.env.local`; l'ambiente della shell ha precedenza. `TELEGRAM_WEBHOOK_SECRET` serve al webhook. Mantieni una sola istanza: un webhook configurato impedisce il polling e non viene rimosso automaticamente. Il percorso supportato è polling locale, processo e connessione attivi.
 
-Per un nuovo database Supabase, le migration creano tabelle, constraint e policy RLS sopra l’infrastruttura Auth già disponibile. Utente Auth e account vanno predisposti privatamente. Non rilanciare la baseline sul progetto esistente. Vedi [supabase/README.md](supabase/README.md) per ordine e prerequisiti.
+Auth e conti vanno predisposti manualmente: UUID risolti da nomi attivi univoci del proprietario, nessuna creazione automatica. Non inserire saldi arbitrari; apertura e data devono essere verificate e configurate insieme. Segui l'ordine e i preflight della [guida Supabase](supabase/README.md), senza rilanciare la baseline su database esistenti.
 
-```bash
-npm run bot:dev
-```
+## Verifiche e limiti
 
-Mantieni una sola istanza; un webhook già configurato impedisce il polling e non viene cancellato automaticamente. Il bot richiede che il processo e la connessione restino attivi. Arresta con Ctrl+C.
+`npm test` esegue Vitest nei workspace bot/dominio, con dati sintetici e servizi simulati. `build` compila entrambi; `typecheck` compila prima il dominio e controlla i workspace. Nessuno di questi comandi testa Supabase remoto. I runner SQL e stress sono separati da Vitest e CI: istruzioni nella guida Supabase.
 
-## Test e CI
+GitHub Actions esegue su push a `main`/`dev` e pull request: `npm ci`, build, typecheck e test su Node 22. Non applica migrazioni né esegue deploy. Per audit delle dipendenze: `npm audit --omit=dev` e `npm audit --include=dev` (comandi npm, non script del progetto).
 
-La suite usa dati sintetici, mock Telegram e mock Supabase. Non carica `.env.local`, non richiede credenziali e non contatta servizi reali.
+Bozze, pannelli e offset sono in memoria, con scadenza di 30 minuti per lo stato conversazionale. Riavviando si perdono le bozze; i pulsanti B1 possono recuperare una ricevuta, senza ricostruire un payload mancante. Il webhook non coordina lo stato UX fra più istanze.
 
-GitHub Actions parte sui push a `main` e `dev` e sulle pull request. Usa Node 22, cache npm, permessi `contents: read` ed esegue `npm ci`, build, typecheck e test. Non esegue deploy o migration.
+L'idempotenza copre la stessa fonte/chiave tramite RPC, non inserimenti diretti o storico precedente a 006. Lo storico mostra solo transazioni, non rettifiche; la paginazione non è uno snapshot congelato. Non esiste un comando generale per impostare aperture o mostrare tutti i saldi. Movimenti e riconciliazione sono coerenti nel fuso predefinito; la riconciliazione usa Europe/Rome fisso anche se APP_TIMEZONE viene cambiato.
 
-Audit delle dipendenze:
+Credenziali, messaggi grezzi, export e dati personali restano fuori da Git. Il database conserva valori contabili e chiavi opache, senza messaggi Telegram grezzi. I log riportano errori sintetici. Una scrittura riuscita rimane persistita anche se Telegram non consegna la risposta.
 
-```bash
-npm audit --omit=dev
-npm audit --include=dev
-```
+## Sviluppi futuri
 
-## Privacy e limiti
-
-Pubblica soltanto codice, configurazioni senza segreti ed esempi sintetici. Credenziali, messaggi privati, export bancari, dataset personali e screenshot finanziari devono restare fuori da Git. Vedi [SECURITY.md](SECURITY.md).
-
-I dati confermati sono salvati nel proprio progetto Supabase; i messaggi attraversano Telegram. Le proposte non conservano il testo originale. I log applicativi riportano errori sintetici senza token o payload finanziari.
-
-Non esiste idempotenza persistente: se la risposta del database si perde, verifica la tabella prima di riprovare. Un INSERT riuscito resta salvato anche se Telegram non consegna la conferma. Il webhook mantiene lo stato solo nel processo corrente e non è adatto a coordinare più istanze.
-
-## Roadmap
-
-- Implementare la dashboard web.
-- Integrare la lettura dei saldi SQL nel bot; aggiungere rettifiche, budget e statistiche.
-- Valutare realtime e un classificatore locale per i casi non riconosciuti dalle regole.
+Dashboard autenticata che legga direttamente Supabase, senza modalità demo/reale separate; riapertura tracciabile delle giornate, correzioni retroattive e storico rettifiche. Budget, statistiche, eventuale realtime e classificatore locale richiedono progettazione separata: non sono funzionalità presenti.
 
 ## Licenza
 
-Il progetto è distribuito con licenza [MIT](LICENSE).
+[MIT](LICENSE).
