@@ -90,6 +90,13 @@ try {
   console.log('B2/B3 SQL passed: INSERT/UPDATE, finite amounts/dates, EUR, RLS, preflight/atomic refusal, history unchanged, all three RPC suites rerun.');
   const checks = (fixture.match(/select pg_temp\.(assert_balance|expect_error)/g) ?? []).length;
   console.log(`SQL integration passed: ${checks} balance/error assertions, RLS and migration preservation checks. Fixtures rolled back.`);
+  await db.exec(await read('../preflight/008_transaction_management.sql'));
+  await db.exec(await read('../migrations/008_transaction_management.sql'));
+  assert.deepEqual((await db.query('select id,type,amount,transaction_date,category,from_account_id,to_account_id from public.transactions')).rows,
+    before.map(({id,type,amount,transaction_date,category,from_account_id,to_account_id})=>({id,type,amount,transaction_date,category,from_account_id,to_account_id})));
+  await db.exec(await read('transaction_management.sql'));
+  await db.exec(await read('history.sql'));
+  console.log('B/C SQL passed: audited/idempotent corrections, cancellation, balances, RLS, cash closure guards and B1 receipts.');
 } finally {
   await db.close();
 }

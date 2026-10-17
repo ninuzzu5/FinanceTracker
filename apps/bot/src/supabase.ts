@@ -1,3 +1,7 @@
+import type { AccountBalance, BalancesRepository } from './balances.js';
+import { ManagementError, type ManagedDetail, type ManagedMovement, type ChangeRequest, type ChangeReceipt, type ManagementRepository } from './management.js';
+import { isRecord } from './telegram.js';
+import { expenseCategoryIds, incomeCategoryIds } from '@finance-tracker/domain';
 import { historyCents } from "./history.js";
 import type { HistoryRepository, HistoryCursor, HistoryPage, HistoryMovement } from "./history.js";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
@@ -28,7 +32,7 @@ function queryError(stage: "accounts_query" | "insert", code?: string): Persiste
   return new PersistenceError(code === "PT422" ? "currency" : code === "PT409" ? "conflict" : code === "PT404" ? "account_missing" : code === "22023" ? "mapping" : code === "PGRST202" ? "configuration" : code === "PT423" ? "closed" : code === "42501" ? "rls" : code?.startsWith("23") ? "constraint" : stage);
 }
 
-export class SupabaseTransactionRepository implements TransactionRepository, ReconciliationRepository, HistoryRepository {
+export class SupabaseTransactionRepository implements TransactionRepository, ReconciliationRepository, HistoryRepository, BalancesRepository, ManagementRepository {
   private client?: SupabaseClient;
   private config?: SupabaseConfig;
   constructor(private readonly configuration = readSupabaseConfig, private readonly clientFactory = createClient) {}
@@ -93,7 +97,7 @@ export class SupabaseTransactionRepository implements TransactionRepository, Rec
     if (cursor && (!/^\d{4}-\d{2}-\d{2}$/.test(cursor.date) || !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(cursor.id))) throw new PersistenceError('mapping');
     const { client, userId } = await this.authenticate();
     try {
-      let query = client.from('transactions').select('id,type,amount::text,transaction_date::text,category,from_account:accounts!transactions_from_account_id_fkey(name,currency),to_account:accounts!transactions_to_account_id_fkey(name,currency)')
+      let query = client.from('transactions').select('id,type,amount::text,transaction_date::text,category,voided_at,from_account:accounts!transactions_from_account_id_fkey(name,currency),to_account:accounts!transactions_to_account_id_fkey(name,currency)')
         .eq('user_id', userId).order('transaction_date', { ascending: false }).order('id', { ascending: false }).limit(6);
       if (cursor) query = query.or(`transaction_date.lt.${cursor.date},and(transaction_date.eq.${cursor.date},id.lt.${cursor.id})`);
       const { data, error } = await query;
@@ -108,11 +112,81 @@ export class SupabaseTransactionRepository implements TransactionRepository, Rec
         };
         const from = account(row.from_account), to = account(row.to_account);
         if ((row.type === 'transfer' && (!from || !to)) || (row.type === 'expense' && !from) || (row.type === 'income' && !to)) throw new PersistenceError('mapping');
-        return { id: row.id, type: row.type, amount: row.amount, date: row.transaction_date, category: row.category, from, to };
+        return { id: row.id, type: row.type, amount: row.amount, date: row.transaction_date, category: row.category, from, to, voided: row.voided_at != null };
       });
       const visible = rows.slice(0,5), last = visible.at(-1);
       return { rows: visible, next: rows.length > 5 && last ? {date:last.date,id:last.id} : null };
     } catch (error) { throw error instanceof PersistenceError ? error : new PersistenceError('accounts_query'); }
+  }
+
+  async getBalances(date: string): Promise<AccountBalance[]> {
+    const {client}=await this.authenticate();
+    try {
+      const {data,error}=await client.rpc('get_account_balances',{p_as_of:date})
+        .select('account_id,account_name,currency,is_active,as_of_date::text,status,balance::text');
+      if(error || !Array.isArray(data)) throw new PersistenceError('accounts_query');
+      const ids=new Set<string>();
+      return data.map(row => {
+        if(!isRecord(row)||typeof row.account_id!=='string'||ids.has(row.account_id)||typeof row.account_name!=='string'||
+          row.currency!=='EUR'||typeof row.is_active!=='boolean'||row.as_of_date!==date||
+          !['configured','not_configured','before_opening'].includes(String(row.status))) throw new PersistenceError('mapping');
+        ids.add(row.account_id);
+        if(row.status==='configured') {if(typeof row.balance!=='string')throw new PersistenceError('mapping');historyCents(row.balance);}
+        else if(row.balance!==null)throw new PersistenceError('mapping');
+        return {id:row.account_id,name:row.account_name.replace(/[\r\n\t]/g,' ').slice(0,100),active:row.is_active,status:row.status as AccountBalance['status'],balance:row.balance as string|null};
+      });
+    } catch(error) {throw error instanceof PersistenceError ? error : new PersistenceError('accounts_query');}
+  }
+
+  private async managementRpc(name: string,args: Record<string,unknown>): Promise<unknown> {
+    try {
+      const {client}=await this.authenticate();const {data,error}=await client.rpc(name,args);
+      if(error) {
+        const codes: Record<string,ConstructorParameters<typeof ManagementError>[0]>={PT409:'changed',PT423:'closed',PT404:'access','42501':'access',PGRST202:'access','22023':'invalid','22003':'invalid','23514':'invalid','23503':'invalid'};
+        throw new ManagementError(codes[error.code]??'unknown');
+      }
+      return data;
+    } catch(error) {throw error instanceof ManagementError ? error : new ManagementError(error instanceof PersistenceError ? 'access' : 'unknown');}
+  }
+
+  async getMovement(id: string): Promise<ManagedDetail> {
+    const data=await this.managementRpc('get_transaction_for_management',{p_transaction_id:id});
+    if(!isRecord(data)||!isRecord(data.movement)||!Array.isArray(data.accounts))throw new ManagementError('invalid');
+    const row=data.movement;
+    const accounts=data.accounts.map(value => {
+      if(!isRecord(value)||typeof value.id!=='string'||typeof value.name!=='string'||value.currency!=='EUR'||typeof value.active!=='boolean')throw new ManagementError('invalid');
+      return {id:value.id,name:value.name.replace(/[\r\n\t]/g,' ').slice(0,100),currency:'EUR' as const,active:value.active};
+    });
+    const validDate=typeof row.date==='string' && /^\d{4}-\d{2}-\d{2}$/.test(row.date) && new Date(`${row.date}T00:00:00Z`).toISOString().slice(0,10)===row.date;
+    if(row.id!==id||!['expense','income','transfer'].includes(String(row.type))||typeof row.amount!=='string'||historyCents(row.amount)<=0n||!validDate||
+      typeof row.version!=='string'||!/^\d+$/.test(row.version)||BigInt(row.version)<1n||BigInt(row.version)>2147483647n||
+      !(row.voided_at===null||typeof row.voided_at==='string')||!(row.voided_by===null||typeof row.voided_by==='string')||
+      (row.voided_at===null)!==(row.voided_by===null))throw new ManagementError('invalid');
+    const has=(value:unknown)=>typeof value==='string'&&accounts.some(a=>a.id===value);
+    if(row.type==='transfer' ? !has(row.from_id)||!has(row.to_id)||row.from_id===row.to_id||row.category!==null :
+      !((row.type==='expense'?expenseCategoryIds:incomeCategoryIds) as readonly unknown[]).includes(row.category)||
+      (row.type==='expense' ? !has(row.from_id)||row.to_id!==null : !has(row.to_id)||row.from_id!==null))throw new ManagementError('invalid');
+    return {movement:row as unknown as ManagedMovement,accounts};
+  }
+
+  private changeReceipt(data: unknown): ChangeReceipt {
+    if(!isRecord(data)||typeof data.transaction_id!=='string'||!['edit','void'].includes(String(data.action))||typeof data.version!=='string'||!/^\d+$/.test(data.version))throw new ManagementError('unknown');
+    return data as unknown as ChangeReceipt;
+  }
+
+  async getChangeReceipt(requestId: string): Promise<ChangeReceipt|null> {
+    const data=await this.managementRpc('get_transaction_change_receipt',{p_request_id:requestId});
+    return data===null?null:this.changeReceipt(data);
+  }
+
+  async changeMovement(request: ChangeRequest): Promise<ChangeReceipt> {
+    const edit=request.action==='edit',v=request.values;
+    const data=await this.managementRpc('manage_transaction_once',{p_request_id:request.requestId,p_transaction_id:request.transactionId,
+      p_expected_version:Number(request.expectedVersion),p_action:request.action,p_amount:edit?v.amount:null,p_date:edit?v.date:null,
+      p_category:edit?v.category:null,p_from_account:edit?v.from_id:null,p_to_account:edit?v.to_id:null});
+    const receipt=this.changeReceipt(data);
+    if(receipt.transaction_id!==request.transactionId||receipt.action!==request.action)throw new ManagementError('unknown');
+    return receipt;
   }
 
   private async cashRpc(name: string, args: Record<string, string>): Promise<Record<string, unknown>> {
@@ -156,4 +230,4 @@ export class SupabaseTransactionRepository implements TransactionRepository, Rec
   }
 
 }
-export const supabaseRepository: TransactionRepository & ReconciliationRepository & HistoryRepository = new SupabaseTransactionRepository();
+export const supabaseRepository: TransactionRepository & ReconciliationRepository & HistoryRepository & BalancesRepository & ManagementRepository = new SupabaseTransactionRepository();

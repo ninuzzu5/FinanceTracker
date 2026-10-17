@@ -99,6 +99,15 @@ try {
   }
   const {integrityConcurrency}=await import('./integrity-concurrency.mjs');
   await integrityConcurrency({admin,connect,user,cash,bank});
+  // Earlier stress suites retain their sessions until runner cleanup. Close them
+  // before the next 25-worker suite rather than exceeding PostgreSQL max_connections.
+  await Promise.allSettled(clients.filter(c=>c!==admin).map(c=>c.end()));
+  clients.splice(0,clients.length,admin);
+  await admin.query(await read('../preflight/008_transaction_management.sql'));
+  await admin.query(await read('../migrations/008_transaction_management.sql'));
+  await admin.query(await read('transaction_management.sql'));
+  const {managementConcurrency}=await import('./management-concurrency.mjs');
+  await managementConcurrency({admin,connect,mustWait});
   console.log('Native PostgreSQL passed: SQL fixtures, five concurrent lock scenarios, snapshot-isolation rejection. No remote connections.');
 } finally {
   await Promise.allSettled(clients.map(c => c.end()));

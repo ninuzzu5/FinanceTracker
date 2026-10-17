@@ -1,3 +1,5 @@
+import { balancesView, type AccountBalance } from './balances.js';
+import { MovementManagement, type ChangeRequest } from './management.js';
 import { euro } from "./money-view.js";
 import { commandName } from "./commands.js";
 import { historyView, type HistoryPage } from "./history.js";
@@ -12,7 +14,12 @@ import { expandOperationKey } from "./operation-key.js";
 import { GuidedEntry } from "./wizard.js";
 
 export type FlowEffect =
-  | { kind: "send"; chatId: number; text: string; keyboard?: InlineKeyboard }
+  | { kind: 'loadBalances'; chatId: number; stateId: string; revision: number; date: string }
+  | { kind: 'loadMovement'; chatId: number; stateId: string; transactionId: string }
+  | { kind: 'manageMovement'; chatId: number; stateId: string; request: ChangeRequest }
+  | { kind: 'recoverChange'; chatId: number; requestId: string }
+  | { kind: 'openHistory'; chatId: number }
+  | { kind: "send"; chatId: number; text: string; keyboard?: InlineKeyboard; persistent?: boolean }
   | { kind: "answer"; queryId: string; text: string }
   | { kind: "loadHistory"; chatId: number; stateId: string; revision: number }
   | { kind: "recoverMovement"; chatId: number; requestId: string }
@@ -28,10 +35,12 @@ const preview = (chatId: number, p: Proposal, title?: string) => send(chatId, pr
 export class ProposalFlow {
   readonly panels = new Map<number, { messageId: number; token: string }>();
   latestSourceId = 0;
+  private readonly balanceUpdates = new Set<number>();
   readonly sourceVersions = new Map<number, number>();
   private readonly guided: GuidedEntry;
+  readonly management: MovementManagement;
   private readonly saving = new Set<number>();
-  constructor(readonly store = new ProposalStore()) { this.guided = new GuidedEntry(store); }
+  constructor(readonly store = new ProposalStore()) { this.guided = new GuidedEntry(store); this.management = new MovementManagement(store,this.saving); }
 
   isSaving(chatId: number): boolean { return this.saving.has(chatId); }
 
@@ -51,17 +60,29 @@ export class ProposalFlow {
         if ("edited_message" in update && pendingProposal?.sourceMessageId === message.message_id) this.store.remove(decision.chatId);
         return [send(decision.chatId, decision.kind === "help" ? decision.reply : "Usa /menu per iniziare.")];
       }
+      if (command === "saldi") {
+        const id = updateId(update)!;
+        if (this.balanceUpdates.has(id)) return [];
+        this.balanceUpdates.add(id);
+        if (this.balanceUpdates.size > 1024) this.balanceUpdates.delete(this.balanceUpdates.values().next().value!);
+        return this.openBalances(decision.chatId,now);
+      }
       if (command === "movimenti") return this.openHistory(decision.chatId);
       if (command === "riconcilia") return [send(decision.chatId, ...this.cashViewArgs(decision.chatId, true))];
       if (command !== "cancel") return this.guided.menu(decision.chatId, message.message_id);
+      const previous = this.store.getState(decision.chatId);
+      const wasUncertainChange = previous?.kind === 'management' && previous.step === 'uncertain';
       const wasUncertainMovement = this.store.get(decision.chatId)?.submitted;
       const wasUncertain = this.store.getState(decision.chatId)?.kind === "reconciliation" && (this.store.getState(decision.chatId) as { step?: string }).step === "uncertain";
       this.store.remove(decision.chatId);
+      if (wasUncertainChange) return [send(decision.chatId, 'Operazione chiusa: eventuali correzioni già salvate non sono annullate. Il vecchio pulsante Conferma può recuperare la ricevuta.')];
       if (wasUncertainMovement) return [send(decision.chatId, "Flusso chiuso: non ho annullato eventuali movimenti già salvati. Il vecchio pulsante Conferma può recuperare la ricevuta.")];
       if (wasUncertain) return [send(decision.chatId, "Flusso chiuso. L'esito resta incerto: non ho annullato eventuali rettifiche nel database.")];
       return [send(decision.chatId, "❌ Flusso annullato. Scrivimi un movimento oppure usa /menu.")];
     }
     if (decision.kind === "help") return [send(decision.chatId, decision.reply)];
+    const managementReply = this.management.text(decision.chatId,message.text,now,(config.messageConfig ?? readMessageConfig()).timeZone);
+    if (managementReply) return managementReply;
     const cash = this.store.getState(decision.chatId);
     if (cash?.kind === "reconciliation") {
       if (cash.step !== "amount") return [send(decision.chatId, "Usa i pulsanti della riconciliazione o /cancel.")];
@@ -105,7 +126,18 @@ export class ProposalFlow {
     return [preview(decision.chatId, proposal, p ? `${title}\nQuesta proposta sostituisce la precedente.` : title)];
   }
 
-  private openHistory(chatId: number): FlowEffect[] {
+  private openBalances(chatId: number, now: Date): FlowEffect[] {
+    const state=this.store.startBalances(chatId,parseDateInput('oggi',now,'Europe/Rome')!,now);
+    return [{kind:'loadBalances',chatId,stateId:state.id,revision:state.revision,date:state.date}];
+  }
+
+  completeBalances(effect: Extract<FlowEffect,{kind:'loadBalances'}>, rows?: AccountBalance[]): FlowEffect[] {
+    const state=this.store.getState(effect.chatId);
+    if(state?.kind!=='balances'||state.id!==effect.stateId||state.revision!==effect.revision)return [];
+    state.loading=false;return [{kind:'send',chatId:effect.chatId,...balancesView(state,rows),persistent:true}];
+  }
+
+  openHistory(chatId: number): FlowEffect[] {
     const state = this.store.startHistory(chatId);
     return [{kind:'loadHistory',chatId,stateId:state.id,revision:state.revision}];
   }
@@ -117,7 +149,7 @@ export class ProposalFlow {
       this.store.remove(effect.chatId);
       return [send(effect.chatId, 'Storico non disponibile o pagina non più valida. Riapri /movimenti e riprova.')];
     }
-    state.next = page.next; state.loading = false;
+    state.next = page.next; state.rows = page.rows; state.loading = false;
     const view = historyView(state,page);
     return [send(effect.chatId,view.text,view.keyboard)];
   }
@@ -185,11 +217,25 @@ export class ProposalFlow {
         String(query.from.id) !== config.allowedChatId || !Number.isSafeInteger(chat.id)) return [];
     const chatId = chat.id as number;
     if (this.saving.has(chatId)) return [{ kind: "answer", queryId: query.id, text: "Salvataggio in corso." }];
+    if (query.data.startsWith('c:')) return this.management.callback(chatId,query.id,query.data);
+    if (query.data.startsWith('b:')) {
+      const state=this.store.getState(chatId),match=/^b:([a-f0-9]{16}):(\d+):(refresh|menu)$/.exec(query.data);
+      const answer: FlowEffect={kind:'answer',queryId:query.id,text:''};
+      if(!match||state?.kind!=='balances'||state.id!==match[1]||state.revision!==Number(match[2]))return [{...answer,text:'Consultazione saldi scaduta o sostituita. Usa /saldi per una nuova rilevazione.'}];
+      if(state.loading)return [{...answer,text:'Lettura dei saldi in corso. Attendi.'}];
+      if(match[3]==='menu')return [answer,...this.guided.menu(chatId)];
+      state.date=parseDateInput('oggi',now,'Europe/Rome')!;state.observedAt=now.toISOString();state.revision++;state.loading=true;
+      return [answer,{kind:'loadBalances',chatId,stateId:state.id,revision:state.revision,date:state.date}];
+    }
     if (query.data.startsWith('h:')) {
       const state = this.store.getState(chatId);
-      const match = /^h:([a-f0-9]{16}):(\d+):(back|next|menu)$/.exec(query.data);
+      const match = /^h:([a-f0-9]{16}):(\d+):(back|next|menu|select\.\d)$/.exec(query.data);
       const answer = (text = ''): FlowEffect => ({kind:'answer',queryId:query.id as string,text});
       if (!match || state?.kind !== 'history' || state.id !== match[1] || state.revision !== Number(match[2]) || state.loading) return [answer(stale)];
+      if (match[3].startsWith('select.')) {
+        const row=state.rows?.[Number(match[3].slice(7))];
+        return row ? [answer(),...this.management.open(chatId,row.id)] : [answer('Movimento non disponibile.')];
+      }
       if (match[3] === 'menu') return [answer(), ...this.guided.menu(chatId)];
       if (match[3] === 'back' && state.page > 0) state.page--;
       else if (match[3] === 'next' && state.next) { state.cursors[++state.page] = state.next; }
@@ -199,8 +245,8 @@ export class ProposalFlow {
     }
     if (query.data.startsWith('m:')) {
       const state = this.store.getState(chatId);
-      const match = /^m:([a-f0-9]{16}):(history|cash)$/.exec(query.data);
-      if (match && state?.kind === 'menu' && state.id === match[1]) return [{kind:'answer',queryId:query.id,text:''}, ...(match[2] === 'history' ? this.openHistory(chatId) : [send(chatId,...this.cashViewArgs(chatId,true))])];
+      const match = /^m:([a-f0-9]{16}):(history|cash|balances)$/.exec(query.data);
+      if (match && state?.kind === 'menu' && state.id === match[1]) return [{kind:'answer',queryId:query.id,text:''}, ...(match[2] === 'balances' ? this.openBalances(chatId,now) : match[2] === 'history' ? this.openHistory(chatId) : [send(chatId,...this.cashViewArgs(chatId,true))])];
     }
     if (query.data.startsWith("r:")) {
       const state = this.store.getState(chatId);

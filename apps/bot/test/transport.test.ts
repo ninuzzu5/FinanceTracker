@@ -94,3 +94,15 @@ it('returns the bot message identity for editing the same UI panel', async () =>
   const fetch = vi.fn().mockResolvedValue(response(200,{ok:true,result:{message_id:101}}));
   await expect(new TelegramClient('synthetic',{fetch}).sendMessage(123456,'Menu')).resolves.toBe(101);
 });
+
+it('does not resend a persistent balance message after an uncertain response', async () => {
+  const fetch=vi.fn().mockRejectedValue(new Error('synthetic response lost'));
+  const wait=vi.fn();
+  await expect(new TelegramClient('synthetic',{fetch,sleep:wait}).sendMessage(123456,'Synthetic balance',undefined,undefined,true)).rejects.toThrow('Problema di rete');
+  expect(fetch).toHaveBeenCalledTimes(1);expect(wait).not.toHaveBeenCalled();
+});
+it('keeps normal sendMessage retry policy unchanged', async () => {
+  const fetch=vi.fn().mockRejectedValueOnce(new Error('synthetic')).mockResolvedValue(response(200,{ok:true,result:{message_id:101}}));
+  await expect(new TelegramClient('synthetic',{fetch,sleep:vi.fn().mockResolvedValue(undefined)}).sendMessage(123456,'Synthetic normal reply')).resolves.toBe(101);
+  expect(fetch).toHaveBeenCalledTimes(2);
+});

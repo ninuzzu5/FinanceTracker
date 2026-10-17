@@ -38,9 +38,9 @@ function apiError(code: number, retryAfter: unknown): TelegramError {
 export class TelegramClient {
   constructor(private readonly token: string, private readonly options: TransportOptions = {}) {}
 
-  async call(method: "getUpdates" | "getWebhookInfo" | "sendMessage" | "answerCallbackQuery" | "editMessageReplyMarkup" | "editMessageText" | "setMyCommands", body: Record<string, unknown>, signal?: AbortSignal): Promise<unknown> {
+  async call(method: "getUpdates" | "getWebhookInfo" | "sendMessage" | "answerCallbackQuery" | "editMessageReplyMarkup" | "editMessageText" | "setMyCommands", body: Record<string, unknown>, signal?: AbortSignal, singleAttempt = false): Promise<unknown> {
     const ancillary = method === "answerCallbackQuery" || method === "editMessageReplyMarkup" || method === "editMessageText" || method === "setMyCommands";
-    const attempts = ancillary ? 1 : this.options.maxAttempts ?? 5;
+    const attempts = ancillary || singleAttempt ? 1 : this.options.maxAttempts ?? 5;
     for (let attempt = 0; attempt < attempts; attempt++) {
       signal?.throwIfAborted();
       try {
@@ -74,8 +74,9 @@ export class TelegramClient {
     throw new TelegramError("Tentativi Telegram esauriti.");
   }
 
-  async sendMessage(chatId: number, text: string, signal?: AbortSignal, keyboard?: InlineKeyboard): Promise<number | void> {
-    const result = await this.call("sendMessage", { chat_id: chatId, text, ...(keyboard ? { reply_markup: keyboard } : {}) }, signal);
+  async sendMessage(chatId: number, text: string, signal?: AbortSignal, keyboard?: InlineKeyboard, singleAttempt = false): Promise<number | void> {
+    const body = { chat_id: chatId, text, ...(keyboard ? { reply_markup: keyboard } : {}) };
+    const result = singleAttempt ? await this.call('sendMessage',body,signal,true) : await this.call('sendMessage',body,signal);
     if (isRecord(result) && Number.isSafeInteger(result.message_id)) return result.message_id as number;
   }
 }

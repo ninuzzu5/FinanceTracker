@@ -19,7 +19,7 @@ Il comando compila il progetto e avvia una singola istanza del bot. Per applicar
 
 Quando compare “Bot locale attivo”, apri la chat privata con il bot configurato:
 
-1. Invia `/start` o `/menu`: riceverai il menu per Movimento, Trasferimento, Storico e Contanti. `/help` mostra la guida con esempi.
+1. Invia `/start` o `/menu`: riceverai il menu per Movimento, Trasferimento, Saldi, Storico e Contanti. `/help` mostra la guida con esempi.
 2. Invia `8,30 tabacco`: riceverai una risposta personale con importo in euro, conto e data in formato giorno/mese/anno, con l’indicazione che è soltanto un’anteprima.
 3. Invia `ciao`: riceverai una richiesta di importo valido e un esempio.
 4. Puoi anche provare `ieri 12,50 spesa` oppure `20 benzina isybank`.
@@ -48,7 +48,7 @@ npm audit --include=dev
 
 Il testo libero continua a funzionare senza `/start`, anche quando è visualizzato il menu. In alternativa:
 
-- `/start` e `/menu`: aprono il menu con **Movimento**, **Trasferimento**, **Storico** e **Contanti**. Chiudono l'eventuale wizard o proposta precedente, dichiarandolo nella risposta.
+- `/start` e `/menu`: aprono il menu con **Movimento**, **Trasferimento**, **Saldi**, **Storico** e **Contanti**. Chiudono l'eventuale wizard o proposta precedente, dichiarandolo nella risposta.
 - `/help`: mostra esempi e comandi senza interrompere il flusso attivo.
 - `/cancel`: chiude lo stato attivo, inclusi storico e riconciliazione, senza cancellare dati già salvati.
 
@@ -60,7 +60,7 @@ La data offre **Oggi**, **Ieri**, **📅 Altra data**. Quest'ultima richiede una
 
 Durante il wizard il testo serve al campo richiesto (importo o data); negli altri passaggi il bot invita a usare i pulsanti. Un movimento completo valido in testo libero sostituisce il wizard con una proposta; un importo standalone continua a compilare il campo richiesto. Puoi anche chiudere il wizard con `/cancel` o tornare al menu con `/menu`.
 
-Lo store condiviso usa uno stato discriminato `menu | wizard | proposal | reconciliation | history`. Il wizard contiene modalità, passaggio, cronologia per Indietro, valori parziali e revisione dei pulsanti. Non conserva il testo originale. Menu e wizard scadono dopo 30 minuti dalla creazione, senza rinnovo a ogni passaggio; a compilazione completa nasce la normale proposta con la propria durata di 30 minuti e gli stessi Conferma/Modifica/Annulla del testo libero. I pulsanti di stati sostituiti o passaggi precedenti sono invalidati. Riavviando il bot si perdono menu, wizard e proposte non confermate; i movimenti già salvati restano in Supabase.
+Lo store condiviso usa uno stato discriminato `menu | wizard | proposal | reconciliation | history | balances | management`. Il wizard contiene modalità, passaggio, cronologia per Indietro, valori parziali e revisione dei pulsanti. Non conserva il testo originale. Menu e wizard scadono dopo 30 minuti dalla creazione, senza rinnovo a ogni passaggio; a compilazione completa nasce la normale proposta con la propria durata di 30 minuti e gli stessi Conferma/Modifica/Annulla del testo libero. I pulsanti di stati sostituiti o passaggi precedenti sono invalidati. Riavviando il bot si perdono menu, wizard e proposte non confermate; i movimenti già salvati restano in Supabase.
 
 Prova manuale completa, in un progetto di test isolato con dati sintetici, dopo l’avvio con `npm run bot:dev`:
 
@@ -305,21 +305,21 @@ messaggi nei conti personali reali.
 
 ## Quattro milestone UX Telegram implementate
 
-1. **UX 1 — Menu dei comandi:** registro unico dei sei comandi e aggiornamento nella chat autorizzata.
+1. **UX 1 — Menu dei comandi:** registro unico dei sette comandi e aggiornamento nella chat autorizzata.
 2. **UX 2 — `/movimenti`:** lettura autenticata dello storico reale, paginazione a cursore e trasferimenti singoli.
 3. **UX 3 — Wizard compatto:** campi e riepiloghi sullo stesso pannello, Indietro/Annulla e passaggio al testo libero.
 4. **UX 4 — Anteprime:** modifica del pannello, invalidazione delle vecchie callback e verifica preventiva delle ricevute B1 per fonti già salvate.
 
 ### Registrazione comandi e pannelli
 
-All'avvio del polling il bot registra `/start`, `/menu`, `/movimenti`, `/riconcilia`,
+All'avvio del polling il bot registra `/start`, `/menu`, `/saldi`, `/movimenti`, `/riconcilia`,
 `/help`, `/cancel` tramite `setMyCommands`, con scope della chat autorizzata. Il
 webhook registra al primo POST autenticato di ciascun processo. Un errore non
 interrompe il bot e non espone il motivo grezzo. Non occorre modificare BotFather.
 Dopo build/riavvio apri la chat privata autorizzata, digita `/` o riapri la chat se
 Telegram mantiene il menu in cache. Il registro è `apps/bot/src/commands.ts`.
 
-Il menu contiene Movimento, Trasferimento, Storico e Contanti. Menu, wizard,
+Il menu contiene Movimento, Trasferimento, Saldi, Storico e Contanti. Menu, wizard,
 modifiche di campi e riepilogo usano il message_id restituito da Telegram per
 aggiornare lo stesso pannello. Conferma e annullamento chiudono i pulsanti; la
 ricevuta conservata include i dati del movimento. Un nuovo flusso invalida il
@@ -360,8 +360,7 @@ precisa. Questa task non aggiunge uno storico dedicato delle rettifiche.
 
 Le callback di pagina hanno sessione e revisione; pagine non valide, letture in
 corso, scadenza, nuova operazione o riavvio impediscono navigazioni obsolete.
-Una lettura fallita invita a riaprire `/movimenti`; non permette modifiche,
-eliminazioni o annullamenti retroattivi. Nessuna nuova migrazione richiesta.
+Una lettura fallita invita a riaprire `/movimenti`. Con 008 ogni riga offre il dettaglio e, se attiva, Modifica o Annulla movimento; nessuna eliminazione fisica. Le rettifiche Contanti rimangono separate.
 
 ### Limiti tecnici
 
@@ -386,11 +385,11 @@ eliminazioni o annullamenti retroattivi. Nessuna nuova migrazione richiesta.
 
 ### Collaudo manuale dopo il riavvio
 
-Usa esclusivamente un progetto di test separato, con schema allineato a 007. Le
+Usa esclusivamente un progetto di test separato, con schema allineato a 008. Le
 verifiche che confermano movimenti/rettifiche scrivono dati sintetici: non eseguirle
 nei conti personali reali.
 
-1. Digita `/`: devono apparire i sei comandi; `/start` e `/menu` mostrano quattro
+1. Digita `/`: devono apparire i sette comandi; `/start` e `/menu` mostrano cinque
    opzioni. Apri Storico e Contanti dal menu.
 2. `/movimenti`: verifica importi, date/categorie/conti; su più di cinque righe usa
    Avanti e Indietro. Un trasferimento deve apparire una volta con la freccia.
@@ -418,7 +417,7 @@ nei conti personali reali.
 
 ## Integrità contabile e fuso orario
 
-La versione attuale richiede migrazioni fino a 007, da applicare manualmente secondo
+La versione attuale richiede migrazioni fino a 008, da applicare manualmente secondo
 [ordine e preflight](../supabase/README.md#migration-order). B2 rifiuta importi
 non finiti/non positivi/sub-cent e date non finite anche con INSERT/UPDATE diretti;
 non arrotonda né corregge lo storico. B3 impone EUR a tutti i conti e verifica la
@@ -432,6 +431,30 @@ stesso istante: non cambiare timezone del database o aggiungere ore ai dati.
 La riconciliazione usa Europe/Rome fisso: mantieni il fuso predefinito per coerenza;
 l’unificazione con APP_TIMEZONE diverso richiede una task separata.
 
-Le aperture sono configurate manualmente, non tramite wizard; non esiste un
-comando generale dei saldi. `/riconcilia` legge il teorico Contanti, mentre la RPC
-get_account_balances è disponibile ai client autenticati per tutti i conti.
+Le aperture sono configurate manualmente, non tramite wizard. `/saldi` legge
+get_account_balances per tutti i conti del proprietario, mentre `/riconcilia`
+legge il teorico Contanti. Le rettifiche restano incluse e i movimenti annullati esclusi.
+
+## Milestone B — `/saldi`
+
+Invia `/saldi` oppure `/menu` → **Saldi**. Mostra i tre conti principali e tutti gli altri conti del proprietario (anche inattivi), saldo teorico e patrimonio. La data contabile è oggi Europe/Rome; ogni consultazione mostra anche data e ora. Ogni `/saldi` e **Aggiorna** invia una nuova rilevazione autonoma: quelle precedenti restano visibili e non vengono sovrascritte da menu, storico, wizard o pulizia delle sessioni. Un'apertura mancante, una data prima dell'apertura o un conto principale assente sono mostrati esplicitamente: totale non disponibile, mai una somma parziale presentata come completa. Errori di rete/dati non producono saldi inventati; usa Aggiorna o riapri il comando. **Menu principale** apre un pannello distinto, conservando i saldi. Solo i pulsanti della sessione/revisione corrente sono validi: quelli di rilevazioni precedenti o scadute invitano a riaprire `/saldi`. Per evitare duplicati un invio saldi ha un solo tentativo Telegram; se l’esito è incerto non viene reinviato automaticamente. Gli update `/saldi` già gestiti sono deduplicati nella memoria del processo, entro la finestra limitata prevista.
+
+## Milestone C — dettaglio, modifica e annullamento
+
+`/movimenti` → pulsante descrittivo del movimento (per esempio **1. ✏️ 15,00 € · Cibo · 17/10**) rilegge il dettaglio. **Modifica** offre importo, data, categoria e conto/i applicabili; il tipo resta invariato. I conti devono essere attivi in EUR e i trasferimenti distinti, senza categoria. Dopo un valore valido compare direttamente il confronto **Prima/Dopo** con l’indicazione “Modifica pronta”. Premi **✅ Conferma modifiche** per salvare, oppure **Modifica ancora** per tornare ai campi. Nei campi trovi anche **✅ Riepilogo e conferma**. Nessun campo viene salvato automaticamente. Dopo il successo, **📋 Torna ai movimenti** rilegge lo storico. Ogni conferma ricontrolla la versione nel database; se il movimento è cambiato riapri lo storico.
+
+**Annulla movimento** apre un’anteprima di annullamento contabile: solo **✅ Conferma annullamento** esclude la transazione dai saldi, preservandola con stato ANNULLATO. **❌ Annulla operazione** e `/cancel` chiudono il flusso senza annullare il movimento. Una transazione già annullata è leggibile ma non modificabile né riattivabile. Le ricevute B1 originali restano intatte; non correggere lo storico modificando il messaggio Telegram originario.
+
+Le giornate Contanti chiuse bloccano entrambe le operazioni, sui riferimenti precedenti e nuovi, anche trasferendo un movimento da banca a Contanti o spostandolo a un'altra data. Non esiste riapertura. Dopo timeout usa **Riprova stessa richiesta** con chiave e valori congelati; un vecchio pulsante dopo riavvio può soltanto recuperare la ricevuta già salvata. Annulla operazione non annulla una correzione dall'esito incerto. Dopo successo riapri `/movimenti` e `/saldi` per la vista aggiornata.
+
+La [checklist B/C](milestones-b-c.md#collaudo-telegram-per-release-v1) contiene esempi concreti, prerequisiti e verifiche remote ancora necessarie.
+
+### Collaudo rapido della rifinitura B/C
+
+Solo dati sintetici nel progetto di test già allineato a 008; **non rieseguire la migrazione**.
+
+1. `/movimenti`: confronta numeri nel testo e nei pulsanti, importi/categorie/date; i trasferimenti indicano i conti. Prova la selezione nella seconda pagina e un vecchio pulsante della prima: deve essere rifiutato. Gli annullati rimangono nell’elenco unico con ❌ ANNULLATO e dettaglio di sola lettura; non è stato aggiunto un filtro.
+2. Apri una spesa di una giornata non chiusa → Modifica → Importo → `15,00`: deve apparire subito Prima/Dopo. **Modifica ancora** permette altre correzioni. Solo **Conferma modifiche** salva; **Annulla operazione** esce. Dopo successo usa **Torna ai movimenti** e verifica la riga aggiornata.
+3. Su un movimento sintetico usa **Annulla movimento**: **Conferma annullamento** lo esclude dai saldi preservando riga/audit, mentre **Annulla operazione** non lo annulla. Dopo successo il movimento deve essere marcato ANNULLATO, senza ulteriori azioni contabili disponibili.
+4. `/saldi` due volte, poi Aggiorna sull’ultima rilevazione: tre messaggi separati con data/ora. Apri Menu principale, storico e wizard: tutti i saldi precedenti devono restare leggibili. I vecchi pulsanti non devono alterare i messaggi né il nuovo flusso. Dopo riavvio usa un nuovo `/saldi`.
+5. Ricontrolla il blocco delle correzioni su Contanti riconciliato e i doppi clic su Conferma. Non modificare vincoli o dati reali per provocare timeout; la perdita di risposta è simulata nei test automatici.

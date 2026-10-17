@@ -2,7 +2,7 @@
 
 Questa directory descrive lo schema applicativo versionato, non lo stato verificato
 del progetto remoto. Il codice attuale usa aperture/saldi, riconciliazione Contanti,
-ricevute idempotenti e vincoli EUR/monetari delle migrazioni fino a 007.
+ricevute idempotenti e vincoli EUR/monetari delle migrazioni fino a 008.
 Nessuna migrazione è applicata automaticamente dal bot.
 
 ## Migration order
@@ -16,13 +16,14 @@ Nessuna migrazione è applicata automaticamente dal bot.
 | [005](migrations/005_cash_reconciliation.sql) | account_adjustments, RPC e lock/trigger di chiusura Contanti; integra rettifiche nei saldi | Dopo 004, verificando firma RPC e vincoli di apertura |
 | [006](migrations/006_transaction_idempotency.sql) | transaction_receipts, save_transaction_once e get_transaction_receipt | Dopo 005, con RLS attiva e oggetti 006 assenti |
 | [007](migrations/007_monetary_integrity_and_eur.sql) | CHECK importi/date, EUR per tutti i conti, controllo EUR nella RPC B1 | Dopo 006 e [preflight READ ONLY](preflight/007_monetary_integrity_and_eur.sql) |
+| [008](migrations/008_transaction_management.sql) | Versioni, annullamento logico, audit e RPC storiche; saldi senza movimenti annullati | Dopo 007 e [preflight READ ONLY](preflight/008_transaction_management.sql); revoca UPDATE/DELETE diretti |
 
-**Database nuovo:** 001 → 002 → 004 → 005 → 006 → 007. La baseline 001
+**Database nuovo:** 001 → 002 → 004 → 005 → 006 → 007 → 008. La baseline 001
 include già il CHECK corretto: non eseguire 003 come passaggio obbligatorio.
 **Database esistente:** confronta catalogo, policy, grant e vincoli; applica soltanto
 i passaggi mancanti, nell'ordine dipendente. Non dedurre applicazione dal nome dei
 file o dal branch. Non rilanciare 001/002 e non rieseguire 003 se già corretto.
-Anche 004–007 vanno applicate una volta: non sono script di reset/riparazione
+Anche 004–008 vanno applicate una volta: non sono script di reset/riparazione
 idempotenti; 007 sostituisce una RPC ma aggiunge vincoli senza IF NOT EXISTS.
 
 Tutti i file sono transazionali: provare su un progetto di test separato, fermare
@@ -44,6 +45,7 @@ Se oggetti o policy differiscono, fermarsi e confrontarli senza DROP correttivi.
   saldo integrato e blocco di giornate chiuse, trasferimenti compresi.
 - 006: ricevute con RLS/sola lettura e immutabilità, FK protetto; RPC con
   privilegi previsti. Stessa chiave/payload = stesso UUID; payload diverso = PT409.
+- 008: versione/stato annullamento, RLS e immutabilità di transaction_changes, RPC storiche, UPDATE/DELETE revocati; annullamenti esclusi dai saldi e blocchi Contanti ancora attivi.
 - 007: tre nuovi CHECK, EUR validato, quelli transazioni inizialmente NOT VALID;
   nuove scritture/UPDATE invalidi rifiutati. Verificare anche la RPC B1 sostituita.
 
@@ -90,7 +92,7 @@ Real values stay in the ignored `.env.local` file or private runtime environment
 
 ## Validation
 
-Normal application tests mock the SDK and never contact the real database. See [the bot guide](../docs/bot-guide.md) for manual application checks. The SQL runner applies 001/002/004/005/006/007, reruns balance/reconciliation/idempotency suites and tests history and integrity. Its assertions execute in disposable embedded PostgreSQL (PGlite), with a minimal local Supabase Auth contract. Hosted Supabase Auth and the remote catalog are not tested. The SQL runner is separate from the default Vitest suite and CI; it never reads credentials or connects to a remote database.
+Normal application tests mock the SDK and never contact the real database. See [the bot guide](../docs/bot-guide.md) for manual application checks. The SQL runner applies 001/002/004/005/006/007/008, reruns balance/reconciliation/idempotency suites and tests history and integrity. Its assertions execute in disposable embedded PostgreSQL (PGlite), with a minimal local Supabase Auth contract. Hosted Supabase Auth and the remote catalog are not tested. The SQL runner is separate from the default Vitest suite and CI; it never reads credentials or connects to a remote database.
 
 
 ## Configurazione manuale del conto Contanti
@@ -234,7 +236,7 @@ Ogni riga contiene `account_id`, `account_name`, `currency`, `is_active`,
 
 Gli intervalli sono inclusivi su entrambe le estremità. I conti inattivi restano
 visibili; un utente senza conti ottiene una lista vuota. Non esiste una colonna di
-saldo corrente. Aggiornare o cancellare un movimento ricalcola le letture successive, se l’operazione è permessa: 005 protegge le giornate Contanti chiuse e 006 impedisce cancellazioni di transazioni con ricevuta.
+saldo corrente. Le correzioni 008 e gli annullamenti logici ricalcolano le letture successive; 005 protegge le giornate Contanti chiuse. UPDATE/DELETE diretti sono revocati e la cancellazione fisica è vietata dal nuovo trigger.
 Ogni lato del trasferimento usa l'apertura del proprio conto: con date diverse un
 trasferimento può ricadere soltanto nell'intervallo di uno dei due conti. La compensazione
 nel patrimonio si verifica quando entrambi i lati sono inclusi.
@@ -253,7 +255,7 @@ FX. Per il patrimonio dei tre conti usa EUR e non sommare valute diverse.
 ### Test senza dati reali né aperture arbitrarie
 
 Il runner `tests/run-account-balances.mjs` avvia PostgreSQL in memoria, con una
-simulazione minima di auth.uid/users/ruoli, applica 001, 002 e 004–007 e verifica anche
+simulazione minima di auth.uid/users/ruoli, applica 001, 002 e 004–008 e verifica anche
 che le transazioni preesistenti rimangano identiche. Non legge `.env`, non contatta
 Supabase e non usa un database su disco. Gli importi sintetici dei test non sono
 valori da trasferire ai conti personali. Nessuna modalità demo/reale è introdotta.
@@ -524,7 +526,7 @@ Fuori copertura:
 
 - Transazioni create prima di 006, senza ricevuta associata; inclusi vecchi pulsanti
   che non contengono la chiave. Non modificare/reinviare vecchie fonti per correggere
-  lo storico: le modifiche/cancellazioni retroattive restano da progettare. `/movimenti` legge lo storico ma non collega vecchie fonti a ricevute mancanti.
+  lo storico: per correggere usa il dettaglio dello storico con 008, che protegge le chiusure Contanti. `/movimenti` legge lo storico ma non collega vecchie fonti a ricevute mancanti.
 - Inserimenti diretti SQL/REST su transactions che non passano dalla nuova RPC;
   restano disponibili secondo le policy preesistenti. B2/B3 proteggono comunque importi, date e valute anche fuori RPC.
 - Un messaggio nuovo, copia/incolla o inoltro con message_id diverso è una nuova
@@ -671,8 +673,8 @@ progetto; socket locale, credenziali sintetiche e cluster eliminato alla fine.
 
 `/movimenti` legge transactions con RLS e filtro proprietario, cinque righe più
 lookahead, cursor transaction_date/id decrescente e importo PostgREST `amount::text`.
-Non legge account_adjustments, non consente correzioni/cancellazioni e non richiede
-una migrazione 008. Il test [history.sql](tests/history.sql) verifica cursore, date
+Non legge account_adjustments. La gestione controllata dei movimenti richiede
+008: lettura del dettaglio, modifica e annullamento logico, senza DELETE. Il test [history.sql](tests/history.sql) verifica cursore, date
 uguali, trasferimento singolo e isolamento tra due proprietari. Nessun indice nuovo
 è introdotto: grandi ledger richiederanno una valutazione prestazionale separata.
 
@@ -682,3 +684,15 @@ SQL conserva caratterizzazioni B2/B3 **prima di 007**, poi verifica le protezion
 dopo 007; quelle caratterizzazioni non indicano che il difetto sia ancora presente
 con tutte le migrazioni applicate. La copertura locale non attesta l'allineamento
 remoto, Auth/JWT reale, rete reale o un deployment multiistanza.
+
+## Migrazione 008 — saldi Telegram e gestione dei movimenti
+
+Prerequisiti, procedura completa, rollback, RPC e collaudo: [Milestone B/C](../docs/milestones-b-c.md). Eseguire [preflight 008](preflight/008_transaction_management.sql) in READ ONLY prima del file [008_transaction_management.sql](migrations/008_transaction_management.sql), dopo 007. Non rieseguire baseline o migrazioni già applicate.
+
+Aggiunge ledger_version (default 1), voided_at/voided_by a transactions e transaction_changes con RLS di sola lettura propria. Il registro mantiene richiesta/payload, autore-proprietario, transaction_id, timestamp e snapshot prima/dopo; non aggiorna le ricevute B1 né i valori finanziari storici all'installazione. Il primo snapshot di correzione conserva lo stato originale. Nessun saldo corrente duplicato.
+
+get_transaction_for_management(uuid) restituisce JSON con importo/versione testuali e conti propri; get_transaction_change_receipt(uuid) legge soltanto la ricevuta di correzione. manage_transaction_once(uuid,uuid,integer,text,numeric,date,text,uuid,uuid) modifica a tipo fisso o annulla, con owner/versione/payload/lock e trigger esistenti. La RPC dei saldi mantiene firma e stati, includendo rettifiche e filtrando voided_at IS NULL. `/saldi` proietta balance::text via PostgREST e somma centesimi BigInt, anche per conti inattivi.
+
+**Cambiamento di autorizzazioni intenzionale:** authenticated perde UPDATE/DELETE diretti su transactions. Le modifiche contabili passano dalla RPC; INSERT resta compatibile con B1 e le policy proprie, senza una nuova garanzia di idempotenza sugli inserimenti diretti. Gli annullamenti preservano riga e ricevuta, senza movimenti compensativi fittizi. I trigger 005 non vengono disabilitati o sostituiti. Vecchie fixture UPDATE/DELETE vengono eseguite prima di 008; la nuova fixture verifica i percorsi RPC e il rifiuto dei percorsi diretti dopo 008.
+
+I runner eseguono anche transaction_management.sql; quello nativo aggiunge management-concurrency.mjs dopo aver rilasciato le connessioni delle suite precedenti. Include 25 retry simultanei, aggiornamenti incompatibili, lock con chiusura, rollback e repository/bot reali con SDK ponte su SQL locale. Il runtime richiede memoria condivisa e socket locali. Non serve accesso a Supabase remoto, non vengono letti file env e nessuna dipendenza entra nel progetto.

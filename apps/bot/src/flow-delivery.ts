@@ -1,3 +1,5 @@
+import type { BalancesRepository } from './balances.js';
+import type { ManagementRepository } from './management.js';
 import type { ReconciliationRepository } from './reconciliation.js';
 import type { TransactionRepository } from './persistence.js';
 import type { HistoryRepository } from './history.js';
@@ -14,7 +16,7 @@ const token = (state: ConversationState | undefined) => state?.kind === 'proposa
 export async function deliverUpdate(
   flow: ProposalFlow, client: Pick<TelegramClient, 'call' | 'sendMessage'>,
   update: unknown, config: TelegramConfig, signal?: AbortSignal, repository: TransactionRepository = supabaseRepository,
-  reconciliation: ReconciliationRepository = supabaseRepository, history: HistoryRepository = supabaseRepository,
+  reconciliation: ReconciliationRepository = supabaseRepository, history: HistoryRepository = supabaseRepository, balances: BalancesRepository = supabaseRepository, management: ManagementRepository = supabaseRepository,
 ): Promise<void> {
   const decision = decideUpdate(update, config);
   const authorized = decision.kind !== 'ignore';
@@ -26,7 +28,7 @@ export async function deliverUpdate(
   const before = flow.store.getState(chatId);
   const beforeToken = token(before);
   let panel = flow.panels.get(chatId);
-  if (isRecord(update) && isRecord(update.callback_query) && isRecord(update.callback_query.message) && typeof update.callback_query.data === 'string' && beforeToken && update.callback_query.data.split(':')[1] === beforeToken && Number.isSafeInteger(update.callback_query.message.message_id)) {
+  if (isRecord(update) && isRecord(update.callback_query) && isRecord(update.callback_query.message) && typeof update.callback_query.data === 'string' && before?.kind !== 'balances' && beforeToken && update.callback_query.data.split(':')[1] === beforeToken && Number.isSafeInteger(update.callback_query.message.message_id)) {
     const callbackParts = update.callback_query.data.split(':');
     const revision = before?.kind === 'proposal' ? before.proposal.revision : before && 'revision' in before ? before.revision : undefined;
     if (revision === undefined || Number(callbackParts[2]) === revision) {
@@ -36,7 +38,7 @@ export async function deliverUpdate(
   }
   let effects: FlowEffect[] | undefined;
   let noticeOnly = false;
-  const fieldReply = isRecord(update) && !('edited_message' in update) && (before?.kind === 'reconciliation' || before?.kind === 'proposal' && before.proposal.editing !== null || before?.kind === 'wizard' && isRecord(message) && typeof message.text === 'string' && parseAmountInput(message.text) !== null);
+  const fieldReply = isRecord(update) && !('edited_message' in update) && (before?.kind === 'management' || before?.kind === 'reconciliation' || before?.kind === 'proposal' && before.proposal.editing !== null || before?.kind === 'wizard' && isRecord(message) && typeof message.text === 'string' && parseAmountInput(message.text) !== null);
   if (!flow.isSaving(chatId) && authorized && isRecord(message) && typeof message.text === 'string' && !fieldReply && (decision.kind === 'preview' || isRecord(update) && 'edited_message' in update || ['start','menu'].includes(commandName(message.text) ?? ''))) {
     const sourceId = message.message_id as number;
     const requestId = sourceOperationKey(chatId,sourceId);
@@ -69,7 +71,7 @@ export async function deliverUpdate(
       effects = flow.handle(update,config);
     }
   } else effects = flow.handle(update, config);
-  if (isRecord(update) && isRecord(update.callback_query) && isRecord(update.callback_query.message) && typeof update.callback_query.data === 'string' && update.callback_query.data.split(':')[1] !== token(flow.store.getState(chatId))) {
+  if (isRecord(update) && isRecord(update.callback_query) && isRecord(update.callback_query.message) && typeof update.callback_query.data === 'string' && !update.callback_query.data.startsWith('b:') && update.callback_query.data.split(':')[1] !== token(flow.store.getState(chatId))) {
     try { await client.call('editMessageReplyMarkup',{chat_id:chatId,message_id:update.callback_query.message.message_id,reply_markup:{inline_keyboard:[]}},signal); }
     catch { signal?.throwIfAborted(); }
   }
@@ -88,9 +90,27 @@ export async function deliverUpdate(
   };
   if (!noticeOnly && panel && target === undefined && (!before || after && !sameSession)) {
     await edit(panel.messageId,!before ? 'Sessione scaduta. Usa /menu per iniziare.' : 'Proposta sostituita. Usa il messaggio più recente.');
-    flow.panels.delete(chatId);
+    flow.panels.delete(chatId);panel=undefined;
   }
   for (const effect of effects!) {
+    if(effect.kind==='openHistory') {effects!.push(...flow.openHistory(effect.chatId));continue;}
+    if(effect.kind==='loadBalances') {
+      try {effects!.push(...flow.completeBalances(effect,await balances.getBalances(effect.date)));}
+      catch {effects!.push(...flow.completeBalances(effect));} continue;
+    }
+    if(effect.kind==='loadMovement') {
+      try {effects!.push(...flow.management.loaded(effect,await management.getMovement(effect.transactionId)));}
+      catch {effects!.push(...flow.management.loaded(effect));} continue;
+    }
+    if(effect.kind==='manageMovement') {
+      try {effects!.push(...flow.management.saved(effect,await management.changeMovement(effect.request)));}
+      catch(error) {effects!.push(...flow.management.saved(effect,undefined,error));} continue;
+    }
+    if(effect.kind==='recoverChange') {
+      let text='Non riesco a verificare la ricevuta. Riprova lo stesso pulsante; nessuna nuova correzione inviata.';
+      try {text=await management.getChangeReceipt(effect.requestId) ? '✅ Correzione già registrata. Ricevuta recuperata, nessuna nuova modifica.' : 'Operazione scaduta. Nessuna ricevuta disponibile; questa verifica non modifica movimenti.';} catch {}
+      await client.sendMessage(effect.chatId,text,signal);continue;
+    }
     if (effect.kind === 'loadHistory') {
       const state = flow.store.getState(effect.chatId);
       if (state?.kind !== 'history' || state.id !== effect.stateId || state.revision !== effect.revision) continue;
@@ -119,6 +139,18 @@ export async function deliverUpdate(
       effects!.push(...flow.completeSave(effect,failure)); continue;
     }
     if (effect.kind === 'send') {
+      if (effect.persistent) {
+        // Balance observations never enter the mutable panel map and are never edited.
+        // One send attempt avoids duplicating a snapshot after an uncertain Telegram response.
+        if (panel) {
+          if (flow.panels.get(effect.chatId)?.token === panel.token) flow.panels.delete(effect.chatId);
+          await edit(panel.messageId,'Sessione precedente chiusa. Usa /menu per iniziare.');
+        }
+        panel=undefined;target=undefined;
+        try {await client.sendMessage(effect.chatId,effect.text,signal,effect.keyboard,true);}
+        catch {signal?.throwIfAborted();console.warn('Invio saldi incerto. Usa /saldi per una nuova consultazione.');}
+        continue;
+      }
       // /help keeps an active session; a source edited into /help closes it instead.
       const separateHelp = noticeOnly || authorized && isRecord(message) && typeof message.text === 'string' && commandName(message.text) === 'help' && isRecord(update) && !('edited_message' in update);
       const active = flow.store.getState(effect.chatId);

@@ -27,9 +27,9 @@ function fixture(store=new ProposalStore()) {
 afterEach(()=>{flows.splice(0).forEach(f=>f.store.clear());vi.restoreAllMocks();});
 const row=(id:string,type:'expense'|'income'|'transfer'='expense'):HistoryMovement=>({id,date:'2026-10-09',type,amount:'12.50',category:type==='expense'?'food':type==='income'?'salary':null,from:type==='income'?null:'Revolut',to:type==='expense'?null:'Contanti'});
 describe('UX1 native commands',()=>{
- it('registers the six implemented commands once per startup with a restricted scope',async()=>{
+ it('registers the seven implemented commands once per startup with a restricted scope',async()=>{
   const client={call:vi.fn().mockResolvedValue(true)};await registerCommands(client,String(chat));
-  expect(telegramCommands.map(c=>c.command)).toEqual(['start','menu','movimenti','riconcilia','help','cancel']);
+  expect(telegramCommands.map(c=>c.command)).toEqual(['start','menu','saldi','movimenti','riconcilia','help','cancel']);
   expect(client.call).toHaveBeenCalledWith('setMyCommands',{commands:telegramCommands,scope:{type:'chat',chat_id:String(chat)}},undefined);
  });
  it('contains registration failure without logging secrets',async()=>{

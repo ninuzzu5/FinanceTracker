@@ -8,6 +8,7 @@ export function menuView(menu: MenuState): { text: string; keyboard: InlineKeybo
     text: "FinanceTracker\n\nScegli un’operazione oppure scrivi direttamente un movimento: ieri 8,30 tabacco isybank",
     keyboard: { inline_keyboard: [[{ text: "➕ Movimento", callback_data: `m:${menu.id}:movement` }],
       [{ text: "🔄 Trasferimento", callback_data: `m:${menu.id}:transfer` }],
+      [{ text: "💰 Saldi", callback_data: `m:${menu.id}:balances` }],
       [{ text: "📋 Storico", callback_data: `m:${menu.id}:history` }, { text: "💵 Contanti", callback_data: `m:${menu.id}:cash` }]] },
   };
 }

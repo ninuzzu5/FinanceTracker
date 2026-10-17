@@ -1,6 +1,7 @@
 export const telegramCommands = [
   { command: 'start', description: 'Avvia FinanceTracker' },
   { command: 'menu', description: 'Apri il menu principale' },
+  { command: 'saldi', description: 'Visualizza saldi e patrimonio' },
   { command: 'movimenti', description: 'Visualizza gli ultimi movimenti' },
   { command: 'riconcilia', description: 'Riconcilia i contanti' },
   { command: 'help', description: 'Mostra la guida' },

@@ -1,3 +1,5 @@
+import type { BalancesState } from './balances.js';
+import type { ManagementState } from './management.js';
 import type { HistoryState } from "./history.js";
 import { randomBytes, randomUUID } from "node:crypto";
 import { expenseCategoryIds, incomeCategoryIds, type CategoryId, type TransactionType, type TransactionDraft } from "@finance-tracker/domain";
@@ -22,9 +24,9 @@ export function categoriesFor(type: TransactionType | null): readonly CategoryId
   return type === "expense" ? expenseCategoryIds : type === "income" ? incomeCategoryIds : [];
 }
 
-export type ConversationState = { kind: "proposal"; proposal: Proposal } | WizardState | MenuState | ReconciliationState | HistoryState;
+export type ConversationState = { kind: "proposal"; proposal: Proposal } | WizardState | MenuState | ReconciliationState | HistoryState | BalancesState | ManagementState;
 
-/** One active menu, wizard or proposal per chat; a shared expiry and no raw messages. */
+/** One active conversation per chat, with expiry and no raw messages. */
 export class ProposalStore {
   private readonly entries = new Map<number, { state: ConversationState; expiresAt: number; timer: ReturnType<typeof setTimeout> }>();
   constructor(private readonly ttlMs = 30 * 60_000, private readonly clock = Date.now) {}
@@ -51,6 +53,16 @@ export class ProposalStore {
     const state: MenuState = { kind: "menu", id: randomBytes(8).toString("hex"), requestId: sourceMessageId === undefined ? randomUUID() : sourceOperationKey(chatId, sourceMessageId) };
     this.put(chatId, state);
     return state;
+  }
+
+  startBalances(chatId: number, date: string, now = new Date()): BalancesState {
+    const state: BalancesState = {kind:'balances',id:randomBytes(8).toString('hex'),revision:0,date,loading:true,observedAt:now.toISOString()};
+    this.put(chatId,state);return state;
+  }
+
+  startManagement(transactionId: string, chatId: number): ManagementState {
+    const state: ManagementState = {kind:'management',id:randomBytes(8).toString('hex'),revision:0,transactionId,step:'loading',requestId:randomUUID(),field:null};
+    this.put(chatId,state);return state;
   }
 
   startHistory(chatId: number): HistoryState {

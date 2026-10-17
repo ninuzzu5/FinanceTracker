@@ -9,11 +9,13 @@ FinanceTracker registra uscite, entrate e trasferimenti tramite Telegram, con pa
 Implementati sul codice di `dev`:
 
 - Testo libero e wizard per Revolut, Isybank e Contanti, categorie separate per entrate/uscite, anteprima modificabile e conferma esplicita.
-- Quattro milestone UX Telegram: menu dei sei comandi, storico `/movimenti`, wizard compatto sullo stesso pannello e gestione delle anteprime/fonti modificate.
+- Quattro milestone UX Telegram: menu dei sette comandi, storico `/movimenti`, wizard compatto sullo stesso pannello e gestione delle anteprime/fonti modificate.
+- `/saldi` e pulsante Saldi: conti, stati di apertura e patrimonio esatto, inclusi conti inattivi; totale non disponibile se incompleto.
+- `/movimenti`: dettaglio, modifica a tipo invariato e annullamento contabile, con audit e idempotenza persistente.
 - Aperture manuali e RPC dei saldi teorici; `/riconcilia` registra rettifiche Contanti a fine giornata e protegge le giornate chiuse.
 - B1: salvataggio atomico e idempotenza persistente per operazione; B2/B3: importi/date validi e conti EUR; B4/B5: rifiuto di importi con segno e trasferimenti ambigui.
 
-Queste funzionalità richiedono lo schema corrispondente alle migrazioni locali fino a 007. **L'allineamento del database remoto non è verificato da questa revisione.** Dashboard, budget, statistiche, realtime, riapertura delle giornate e correzioni retroattive avanzate restano da sviluppare.
+Queste funzionalità richiedono lo schema corrispondente alle migrazioni locali fino a 008. **L'allineamento del database remoto non è verificato da questa revisione.** Dashboard, budget, statistiche, realtime, riapertura delle giornate e correzioni retroattive avanzate restano da sviluppare.
 
 ```text
 Testo libero o wizard → parsing/classificazione → anteprima e modifiche
@@ -29,7 +31,7 @@ Esempi: `ieri 12,50 spesa isybank`, `100 stipendio revolut`, `12 pranzo cash`, `
 
 - `packages/domain`: tipi, parser, date, importi, conti, categorie e regole lessicali.
 - `apps/bot`: polling/webhook, stato temporaneo, wizard, viste, storico e repository Supabase.
-- `supabase`: migrazioni 001–007, preflight e test SQL isolati.
+- `supabase`: migrazioni 001–008, preflight e test SQL isolati.
 - `apps/web`: solo documentazione; nessuna dashboard o applicazione React attuale.
 - `model`: proposta di eventuale classificatore locale; nessun modello attivo.
 
@@ -73,13 +75,15 @@ GitHub Actions esegue su push a `main`/`dev` e pull request: `npm ci`, build, ty
 
 Bozze, pannelli e offset sono in memoria, con scadenza di 30 minuti per lo stato conversazionale. Riavviando si perdono le bozze; i pulsanti B1 possono recuperare una ricevuta, senza ricostruire un payload mancante. Il webhook non coordina lo stato UX fra più istanze.
 
-L'idempotenza copre la stessa fonte/chiave tramite RPC, non inserimenti diretti o storico precedente a 006. Lo storico mostra solo transazioni, non rettifiche; la paginazione non è uno snapshot congelato. Non esiste un comando generale per impostare aperture o mostrare tutti i saldi. Movimenti e riconciliazione sono coerenti nel fuso predefinito; la riconciliazione usa Europe/Rome fisso anche se APP_TIMEZONE viene cambiato.
+L'idempotenza copre la stessa fonte/chiave tramite RPC, non inserimenti diretti o storico precedente a 006. Lo storico mostra solo transazioni, non rettifiche; la paginazione non è uno snapshot congelato. Le aperture restano manuali; `/saldi` legge il giorno corrente Europe/Rome. Le transazioni annullate rimangono leggibili ma non modificabili e non contribuiscono ai saldi. Movimenti e riconciliazione sono coerenti nel fuso predefinito; la riconciliazione usa Europe/Rome fisso anche se APP_TIMEZONE viene cambiato.
 
 Credenziali, messaggi grezzi, export e dati personali restano fuori da Git. Il database conserva valori contabili e chiavi opache, senza messaggi Telegram grezzi. I log riportano errori sintetici. Una scrittura riuscita rimane persistita anche se Telegram non consegna la risposta.
 
+Per migrazione 008, limiti e collaudo Telegram delle Milestone B/C: [guida operativa](docs/milestones-b-c.md). Queste milestone non costituiscono una dichiarazione di Release v1 completata.
+
 ## Sviluppi futuri
 
-Dashboard autenticata che legga direttamente Supabase, senza modalità demo/reale separate; riapertura tracciabile delle giornate, correzioni retroattive e storico rettifiche. Budget, statistiche, eventuale realtime e classificatore locale richiedono progettazione separata: non sono funzionalità presenti.
+Dashboard autenticata che legga direttamente Supabase, senza modalità demo/reale separate; riapertura tracciabile delle giornate, cambio tipo dei movimenti e storico rettifiche. Le correzioni ordinarie sono già disponibili; le giornate Contanti chiuse restano protette. Budget, statistiche, eventuale realtime e classificatore locale richiedono progettazione separata: non sono funzionalità presenti.
 
 ## Licenza
 

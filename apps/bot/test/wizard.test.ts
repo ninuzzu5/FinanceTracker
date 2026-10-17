@@ -36,7 +36,7 @@ afterEach(() => { flow.store.clear(); vi.useRealTimers(); });
 
 describe("guided entry and menu", () => {
   it.each(["/start", "/menu", "/start@niuzzu_bot"])("opens the minimal menu with %s", (command) => {
-    expect(labels(text(command))).toEqual(["➕ Movimento", "🔄 Trasferimento", "📋 Storico", "💵 Contanti"]);
+    expect(labels(text(command))).toEqual(["➕ Movimento", "🔄 Trasferimento", "💰 Saldi", "📋 Storico", "💵 Contanti"]);
     expect(flow.store.getState(chatId)?.kind).toBe("menu");
   });
 
