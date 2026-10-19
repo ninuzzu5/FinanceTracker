@@ -6,6 +6,8 @@ on:
       - main
       - dev
   pull_request:
+  # Linux SQL qualification is manual until its setup has passed on a clean runner.
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -13,12 +15,15 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
           cache: npm
@@ -34,3 +39,45 @@ jobs:
 
       - name: Test
         run: npm test
+
+      - name: Audit all dependencies
+        run: npm audit
+
+      - name: Audit production dependencies
+        run: npm audit --omit=dev
+
+  sql-qualification:
+    name: Manual Linux SQL qualification (not yet a required check)
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install project dependencies
+        run: npm ci
+
+      - name: Build repository for bot and SQL integration tests
+        run: npm run build
+
+      - name: Install isolated PGlite runtime
+        run: npm install --prefix "$RUNNER_TEMP/financetracker-sql" --no-save --package-lock=false --ignore-scripts @electric-sql/pglite@0.5.8
+
+      - name: SQL integration (migrations, balances, RLS, receipts, corrections)
+        run: node supabase/tests/run-account-balances.mjs "$RUNNER_TEMP/financetracker-sql/node_modules/@electric-sql/pglite/dist/index.js"
+
+      # Installation scripts are needed to restore the native PostgreSQL binary symlinks.
+      - name: Install isolated native PostgreSQL runtime
+        run: npm install --prefix "$RUNNER_TEMP/financetracker-native" --no-save --package-lock=false embedded-postgres@18.4.0-beta.17
+
+      - name: Native PostgreSQL concurrency (temporary Unix socket only)
+        run: node supabase/tests/run-cash-concurrency.mjs "$RUNNER_TEMP/financetracker-native/node_modules/embedded-postgres/dist/index.js" --b1 --audit

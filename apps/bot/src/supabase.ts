@@ -20,7 +20,12 @@ export function readSupabaseConfig(env: NodeJS.ProcessEnv = process.env): Supaba
   const { SUPABASE_URL: url, SUPABASE_ANON_KEY: anonKey, SUPABASE_USER_EMAIL: email, SUPABASE_USER_PASSWORD: password } = env;
   if (!url || !anonKey || !email || !password) throw new PersistenceError("configuration");
   try {
-    if (!["https:", "http:"].includes(new URL(url).protocol)) throw new Error();
+    const endpoint = new URL(url);
+    const authority = /^https?:\/\/([^/?#]+)/i.exec(url)?.[1];
+    if (!authority || /[\s\\]/u.test(url) || authority.includes('@') || endpoint.username || endpoint.password) throw new Error();
+    // Check the original authority: URL normalizes ambiguous IPv4 forms such as 127.1.
+    const explicitLoopback = /^(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?$/i.test(authority);
+    if (endpoint.protocol !== 'https:' && !(endpoint.protocol === 'http:' && explicitLoopback)) throw new Error();
     if (anonKey.startsWith("sb_secret_")) throw new Error();
     const jwt = anonKey.split(".");
     if (jwt.length === 3 && JSON.parse(Buffer.from(jwt[1], "base64url").toString()).role !== "anon") throw new Error();

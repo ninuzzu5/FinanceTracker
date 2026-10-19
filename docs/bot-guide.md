@@ -7,7 +7,7 @@ Dalla root del progetto, configura privatamente `.env.local`. Se il file esiste 
 - `APP_TIMEZONE`: fuso orario, predefinito `Europe/Rome`.
 - `DEFAULT_ACCOUNT`: `revolut` (predefinito), `isybank` oppure `contanti`.
 
-Il programma carica `.env.local` a runtime tramite `process.loadEnvFile`, nativo di Node.js 22+. Le variabili già presenti nell'ambiente della shell hanno precedenza. Il file è escluso da Git: non pubblicare token, ID o contenuto del file. Per il polling non servono webhook secret o hosting. Per usare il flusso attuale servono le quattro variabili Supabase indicate sotto; vengono validate alla prima operazione Supabase, anche lettura di ricevute o storico. La validazione locale controlla formato e presenza delle impostazioni; Telegram verifica il token alla prima richiesta.
+Il programma carica `.env.local` a runtime tramite `process.loadEnvFile`, nativo di Node.js; per la toolchain usa Node 22 LTS aggiornato, almeno 22.12. Le variabili già presenti nell'ambiente della shell hanno precedenza. Il file è escluso da Git: non pubblicare token, ID o contenuto del file. Per il polling non servono webhook secret o hosting. Per usare il flusso attuale servono le quattro variabili Supabase indicate sotto; vengono validate alla prima operazione Supabase, anche lettura di ricevute o storico. La validazione locale controlla formato e presenza delle impostazioni; Telegram verifica il token alla prima richiesta.
 
 Avvia dalla root:
 
@@ -34,7 +34,7 @@ Nel polling getUpdates/getWebhookInfo/sendMessage hanno timeout fino a 40 second
 
 I test automatici usano trasporto simulato e non caricano `.env.local` né contattano Telegram. Il webhook resta disponibile e condivide elaborazione e trasporto con il bot locale; non usarlo contemporaneamente al polling.
 
-Verifiche e audit separato per produzione/sviluppo:
+Verifiche locali (Node 22.12+, servizi simulati) e audit per produzione/sviluppo:
 
 ```bash
 npm run build
@@ -43,6 +43,12 @@ npm test
 npm audit --omit=dev
 npm audit --include=dev
 ```
+
+La CI ordinaria include questi controlli e audit completo. SQL/concorrenza sono anche predisposti come qualificazione Linux manuale nel workflow, non ancora obbligatoria: [setup e limiti](../supabase/README.md#ci-e-qualificazione-linux).
+
+**Rischio noto UX-01, accettato per la v1 personale:** mentre il bot attende un campo del wizard, dell'editor o della riconciliazione, non modificare messaggi estranei nella chat; invia una nuova risposta e controlla l'anteprima. Un edit estraneo può compilare il campo attivo. La conferma resta necessaria; questo difetto non è corretto dalla task di hardening.
+
+Gli endpoint Supabase remoti richiedono HTTPS e non possono contenere userinfo. HTTP è consentito solo per `localhost`, `127.0.0.1` o `[::1]` espliciti, con porta opzionale, per sviluppo locale.
 
 ### Menu e inserimento guidato
 

@@ -11,6 +11,13 @@ if (!runtimePath) {
 const { PGlite } = await import(pathToFileURL(resolve(runtimePath)).href);
 const db = new PGlite(); // In-memory; no filesystem database and no network.
 const read = path => readFile(new URL(path, import.meta.url), "utf8");
+// Preserve exact SQL values, including +/-infinity dates. Invalid Date equality differs
+// between Node versions; textual SQL snapshots also keep the two infinities distinct.
+const ledgerRows = async () => (await db.query(`
+  select id,user_id,type,amount::text,transaction_date::text,category,description,
+    from_account_id,to_account_id,created_at::text,updated_at::text
+  from public.transactions order by id
+`)).rows;
 try {
   // Minimal Supabase Auth contract for testing; this is not a replacement for hosted Auth.
   await db.exec(`
@@ -39,23 +46,24 @@ try {
        ('00000000-0000-4000-8000-000000000099', 'income', 1, 'infinity', 'salary', '10000000-0000-4000-8000-000000000099'),
        ('00000000-0000-4000-8000-000000000099', 'income', 1, '-infinity', 'salary', '10000000-0000-4000-8000-000000000099');
   `);
-  const before = (await db.query("select * from public.transactions")).rows;
+  const before = await ledgerRows();
+  assert.deepEqual(before.map(row => row.transaction_date).filter(date => date.includes('infinity')).sort(), ['-infinity', 'infinity']);
   await db.exec(await read("../migrations/004_account_openings_and_balances.sql"));
-  assert.deepEqual((await db.query("select * from public.transactions")).rows, before);
+  assert.deepEqual(await ledgerRows(), before);
   const opening = (await db.query("select opening_balance, opening_date from public.accounts")).rows[0];
   assert.deepEqual(opening, { opening_balance: null, opening_date: null });
   const fixture = await read("account_balances.sql");
   await db.exec(fixture);
   assert.equal((await db.query("select count(*)::int as n from public.accounts")).rows[0].n, 1);
   await db.exec(await read("../migrations/005_cash_reconciliation.sql"));
-  assert.deepEqual((await db.query("select * from public.transactions")).rows, before);
+  assert.deepEqual(await ledgerRows(), before);
   await db.exec(fixture); // Re-run Milestone 1 against the replacement RPC.
   const cashFixture = await read("cash_reconciliation.sql");
   await db.exec(cashFixture);
   assert.equal((await db.query("select count(*)::int as n from public.account_adjustments")).rows[0].n, 0);
   console.log(`Cash SQL passed: ${(cashFixture.match(/select pg_temp\.(check_true|expect_error)/g) ?? []).length} assertions; fixtures rolled back.`);
   await db.exec(await read("../migrations/006_transaction_idempotency.sql"));
-  assert.deepEqual((await db.query("select * from public.transactions")).rows, before);
+  assert.deepEqual(await ledgerRows(), before);
   assert.equal((await db.query("select count(*)::int n from public.transaction_receipts")).rows[0].n, 0);
   const receipts = await read("transaction_idempotency.sql");
   await db.exec(receipts);
@@ -68,14 +76,14 @@ try {
   const preflight = await db.exec(await read('../preflight/007_monetary_integrity_and_eur.sql'));
   assert.equal(preflight.find(result => result.rows[0]?.incompatible_transactions !== undefined).rows[0].incompatible_transactions,5);
   assert.equal(preflight.find(result => result.rows[0]?.currency === 'USD').rows.length,1);
-  assert.deepEqual((await db.query('select * from public.transactions')).rows,before);
+  assert.deepEqual(await ledgerRows(),before);
   await assert.rejects(db.exec(await read('../migrations/007_monetary_integrity_and_eur.sql')), {code:'PT422'});
   await db.exec('rollback');
   assert.equal((await db.query("select count(*)::int n from pg_constraint where conname='transactions_money_integrity_check'")).rows[0].n,0);
   await db.exec("delete from public.accounts where name='Legacy USD'"); // Test-only synthetic fixture, never remote.
   await db.exec(await read('../preflight/007_monetary_integrity_and_eur.sql'));
   await db.exec(await read('../migrations/007_monetary_integrity_and_eur.sql'));
-  assert.deepEqual((await db.query('select * from public.transactions')).rows,before);
+  assert.deepEqual(await ledgerRows(),before);
   await assert.rejects(db.exec("update public.transactions set category='salary' where amount=0.001"),{code:'23514'});
   // Make preserved legacy precision relevant: unchanged read guard must still refuse it.
   await db.exec("update public.accounts set opening_balance=0, opening_date='2026-01-01' where name='Existing'; set role authenticated; select set_config('request.jwt.claim.sub','00000000-0000-4000-8000-000000000099',false)");
@@ -92,8 +100,7 @@ try {
   console.log(`SQL integration passed: ${checks} balance/error assertions, RLS and migration preservation checks. Fixtures rolled back.`);
   await db.exec(await read('../preflight/008_transaction_management.sql'));
   await db.exec(await read('../migrations/008_transaction_management.sql'));
-  assert.deepEqual((await db.query('select id,type,amount,transaction_date,category,from_account_id,to_account_id from public.transactions')).rows,
-    before.map(({id,type,amount,transaction_date,category,from_account_id,to_account_id})=>({id,type,amount,transaction_date,category,from_account_id,to_account_id})));
+  assert.deepEqual(await ledgerRows(), before);
   await db.exec(await read('transaction_management.sql'));
   await db.exec(await read('history.sql'));
   console.log('B/C SQL passed: audited/idempotent corrections, cancellation, balances, RLS, cash closure guards and B1 receipts.');

@@ -39,7 +39,7 @@ Consulta [architettura](docs/architecture.md), [guida Telegram e collaudo](docs/
 
 ## Sviluppo locale
 
-Node.js **22+**, comandi dalla root:
+Node.js **22 LTS aggiornato (almeno 22.12)**, comandi dalla root. Il requisito minimo è allineato alla toolchain di test; non servono credenziali per installazione, build e test:
 
 ```bash
 npm ci
@@ -57,7 +57,7 @@ Crea privatamente `.env.local` da `.env.example`, preservando un file già esist
 | --- | --- |
 | `TELEGRAM_BOT_TOKEN` | Token del proprio bot |
 | `TELEGRAM_ALLOWED_CHAT_ID` | Chat privata autorizzata |
-| `SUPABASE_URL` | URL del progetto |
+| `SUPABASE_URL` | Endpoint HTTPS senza credenziali incorporate; HTTP solo su loopback esplicito di sviluppo |
 | `SUPABASE_ANON_KEY` | Chiave pubblica, mai secret/service role |
 | `SUPABASE_USER_EMAIL`, `SUPABASE_USER_PASSWORD` | Utente Auth dedicato |
 | `APP_TIMEZONE` | Default `Europe/Rome` |
@@ -69,9 +69,13 @@ Auth e conti vanno predisposti manualmente: UUID risolti da nomi attivi univoci 
 
 ## Verifiche e limiti
 
-`npm test` esegue Vitest nei workspace bot/dominio, con dati sintetici e servizi simulati. `build` compila entrambi; `typecheck` compila prima il dominio e controlla i workspace. Nessuno di questi comandi testa Supabase remoto. I runner SQL e stress sono separati da Vitest e CI: istruzioni nella guida Supabase.
+`npm test` esegue Vitest nei workspace bot/dominio, con dati sintetici e servizi simulati. `build` compila entrambi; `typecheck` compila prima il dominio e controlla i workspace. Nessuno di questi comandi testa Supabase remoto. I runner SQL e stress sono separati da Vitest: setup nella [guida Supabase](supabase/README.md#ci-e-qualificazione-linux).
 
-GitHub Actions esegue su push a `main`/`dev` e pull request: `npm ci`, build, typecheck e test su Node 22. Non applica migrazioni né esegue deploy. Per audit delle dipendenze: `npm audit --omit=dev` e `npm audit --include=dev` (comandi npm, non script del progetto).
+Il workflow GitHub Actions preparato esegue su push a `main`/`dev` e pull request: `npm ci`, build, typecheck, test, `npm audit` completo e `npm audit --omit=dev` su Node 22. Tutti gli errori falliscono il job. Le Actions sono vincolate a SHA completi, con `contents: read` e senza credenziali Git persistite.
+
+L'avvio manuale del workflow (`workflow_dispatch`) aggiunge la **qualificazione SQL Linux**: PGlite e PostgreSQL nativo isolato, compresi stress e integrazione bot. Le suite sono state eseguite su macOS/Node 22 con runtime temporanei, **non ancora su un runner Linux pulito**; per questo non è obbligatorio sui push/PR. Un verde ordinario non attesta la suite SQL: resta un gate manuale di release finché la qualificazione non sarà superata e revisionata. Non vengono usati dati reali, credenziali Supabase, segreti configurati o deploy. Vedi [stato del hardening](docs/hardening-2026-10-19.md).
+
+Il [report pre-release](docs/audit-v1-2026-10-17.md) conserva evidenze e rischi residui. UX-01 rimane un rischio noto accettato per la v1 personale: durante wizard, modifica e riconciliazione, invia nuove risposte invece di modificare messaggi estranei e controlla il riepilogo prima di confermare. OPS-01 resta aperto fino alla prova manuale di backup/ripristino.
 
 Bozze, pannelli e offset sono in memoria, con scadenza di 30 minuti per lo stato conversazionale. Riavviando si perdono le bozze; i pulsanti B1 possono recuperare una ricevuta, senza ricostruire un payload mancante. Il webhook non coordina lo stato UX fra più istanze.
 

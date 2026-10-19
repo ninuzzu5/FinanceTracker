@@ -45,9 +45,9 @@ Se oggetti o policy differiscono, fermarsi e confrontarli senza DROP correttivi.
   saldo integrato e blocco di giornate chiuse, trasferimenti compresi.
 - 006: ricevute con RLS/sola lettura e immutabilità, FK protetto; RPC con
   privilegi previsti. Stessa chiave/payload = stesso UUID; payload diverso = PT409.
-- 008: versione/stato annullamento, RLS e immutabilità di transaction_changes, RPC storiche, UPDATE/DELETE revocati; annullamenti esclusi dai saldi e blocchi Contanti ancora attivi.
 - 007: tre nuovi CHECK, EUR validato, quelli transazioni inizialmente NOT VALID;
   nuove scritture/UPDATE invalidi rifiutati. Verificare anche la RPC B1 sostituita.
+- 008: versione/stato annullamento, RLS e immutabilità di transaction_changes, RPC storiche, UPDATE/DELETE revocati; annullamenti esclusi dai saldi e blocchi Contanti ancora attivi.
 
 Controllare oggetti tramite pg_constraint, pg_policies, pg_class.relrowsecurity,
 pg_proc e privilegi effettivi; le query di preflight nelle sezioni sotto danno
@@ -64,7 +64,7 @@ No users, accounts, transactions or seeds are inserted. Real Auth users and acco
 
 The initial baseline includes the corrected category constraint: the category CHECK explicitly requires `category IS NOT NULL` for expense/income, together with a category valid for that type. For transfers the category must be NULL and the two accounts must be distinct. The category column remains nullable to support transfers. Category identifiers match the domain taxonomy. The later incremental migrations add the protections documented below; unused baseline columns are not application features.
 
-`created_at` and `updated_at` have insertion defaults only. No automatic timestamp-update trigger is introduced. The policy names in this baseline are descriptive local names; names and grants have not been compared to the remote catalog. The supplied ownership model is preserved: SELECT and DELETE use `USING`, INSERT uses `WITH CHECK`, and UPDATE uses both, preventing changes to another owner's user ID. Composite foreign keys prevent references to another user's accounts. No policy authorizes anonymous users, and RLS is never disabled.
+`created_at` and `updated_at` have insertion defaults. Migration 008 explicitly updates `updated_at` during audited corrections; no automatic timestamp-update trigger is introduced. The policy names in this baseline are descriptive local names; names and grants have not been compared to the remote catalog. The supplied ownership model is preserved: SELECT and DELETE use `USING`, INSERT uses `WITH CHECK`, and UPDATE uses both, preventing changes to another owner's user ID. Composite foreign keys prevent references to another user's accounts. No policy authorizes anonymous users, and RLS is never disabled.
 
 ## Existing database: category preflight and migration 003
 
@@ -92,8 +92,34 @@ Real values stay in the ignored `.env.local` file or private runtime environment
 
 ## Validation
 
-Normal application tests mock the SDK and never contact the real database. See [the bot guide](../docs/bot-guide.md) for manual application checks. The SQL runner applies 001/002/004/005/006/007/008, reruns balance/reconciliation/idempotency suites and tests history and integrity. Its assertions execute in disposable embedded PostgreSQL (PGlite), with a minimal local Supabase Auth contract. Hosted Supabase Auth and the remote catalog are not tested. The SQL runner is separate from the default Vitest suite and CI; it never reads credentials or connects to a remote database.
+Normal application tests mock the SDK and never contact the real database. See [the bot guide](../docs/bot-guide.md) for manual application checks. The SQL runner applies 001/002/004/005/006/007/008, reruns balance/reconciliation/idempotency suites and tests history and integrity. Its assertions execute in disposable embedded PostgreSQL (PGlite), with a minimal local Supabase Auth contract. Hosted Supabase Auth and the remote catalog are not tested. The SQL runner is separate from the default Vitest suite. It is also prepared as a manual Linux qualification job in CI, pending a clean Linux run; it never reads credentials or connects to a remote database.
 
+
+## CI e qualificazione Linux
+
+Il workflow locale predisposto in `.github/workflows/ci.yml` eseguirà automaticamente installazione, build,
+typecheck, Vitest e audit npm completo/produttivo su Node 22. Le suite SQL sono
+preparate nel job `sql-qualification`, attivo soltanto con `workflow_dispatch`.
+Il job installa runtime con versioni esplicite sotto `RUNNER_TEMP`, compila il bot,
+esegue PGlite e poi PostgreSQL nativo con `--b1 --audit`. Nessun segreto configurato,
+credenziale Supabase, database preesistente o listener TCP. Un errore di setup o
+una asserzione fallita rende rosso il job: nessun `continue-on-error`.
+
+Il collaudo locale macOS/Node 22 non dimostra la riproducibilità Linux. In assenza
+di un runner Linux disponibile, la qualificazione resta manuale, come concordato;
+un verde del solo job applicativo non sostituisce il gate SQL della release.
+Dopo revisione e pubblicazione autorizzata del workflow, eseguirlo manualmente
+sul commit da qualificare in un runner GitHub pulito, registrare SHA, versioni e
+risultati, quindi valutare una PR separata che renda automatico/obbligatorio almeno
+PGlite. Per il nativo verificare permessi di esecuzione, symlink, memoria condivisa
+e socket Unix. Se il setup nativo è instabile su Linux, conservarlo come gate
+manuale locale, documentando il motivo senza sopprimere errori nel workflow.
+
+I comandi di setup locali nelle sezioni sotto usano `mktemp -d`, versioni uguali
+al workflow e dati sintetici. Non leggere `.env.local`. Il runner PGlite confronta
+snapshot SQL testuali ordinati, mantenendo distinti `infinity` e `-infinity`;
+questo evita il confronto di `Invalid Date` non portabile fra Node 22 e 24.
+Stato completo in [hardening pre-release](../docs/hardening-2026-10-19.md).
 
 ## Configurazione manuale del conto Contanti
 
@@ -215,7 +241,7 @@ di abilitare il calcolo: nessuna correzione automatica è prevista.
 La RPC è `get_account_balances`, con parametro obbligatorio `p_as_of` (`YYYY-MM-DD`).
 Un client Supabase **già autenticato come proprietario** può invocare
 `client.rpc('get_account_balances', { p_as_of: '2026-10-03' })`.
-Non esiste un comando per configurare aperture o elencare tutti i saldi.
+Le aperture non hanno un comando di configurazione; `/saldi` elenca i saldi del giorno corrente.
 `/riconcilia` legge il teorico Contanti tramite le RPC 005; le aperture restano manuali.
 
 La funzione è `SECURITY INVOKER`, con search_path vuoto, RLS e filtri espliciti su
@@ -260,17 +286,18 @@ che le transazioni preesistenti rimangano identiche. Non legge `.env`, non conta
 Supabase e non usa un database su disco. Gli importi sintetici dei test non sono
 valori da trasferire ai conti personali. Nessuna modalità demo/reale è introdotta.
 
-Per eseguire i test SQL senza aggiungere dipendenze al progetto:
+Per eseguire i test SQL senza aggiungere dipendenze al progetto, dalla root con Node 22.12+:
 
 ```sh
-npm install --prefix /private/tmp/financetracker-sql-runtime --no-save --package-lock=false --ignore-scripts @electric-sql/pglite@0.5.8
-node supabase/tests/run-account-balances.mjs /private/tmp/financetracker-sql-runtime/node_modules/@electric-sql/pglite/dist/index.js
+FT_SQL_RUNTIME="$(mktemp -d)"
+npm install --prefix "$FT_SQL_RUNTIME" --no-save --package-lock=false --ignore-scripts @electric-sql/pglite@0.5.8
+node supabase/tests/run-account-balances.mjs "$FT_SQL_RUNTIME/node_modules/@electric-sql/pglite/dist/index.js"
 npm test
 npm run typecheck
 npm run build
 ```
 
-Su sistemi diversi da macOS usa una cartella temporanea equivalente. È possibile
+Mantieni `FT_SQL_RUNTIME` nella stessa shell per le esecuzioni successive; la directory può essere rimossa dopo il collaudo. È possibile
 eseguire `tests/account_balances.sql` anche su PostgreSQL/Supabase **isolato e usa e
 getta**, dopo le migrazioni e impostando `financetracker.test_database = 'isolated'`.
 Il file usa fixture con UUID sintetici, cambia ruoli soltanto nella sessione di test
@@ -396,8 +423,11 @@ Per la concorrenza serve PostgreSQL nativo con sessioni distinte. Nessuna dipend
 è aggiunta al progetto: puoi installare il runtime in una cartella temporanea.
 
 ```sh
-npm install --prefix /private/tmp/financetracker-concurrency-runtime --no-save --package-lock=false embedded-postgres@18.4.0-beta.17
-node supabase/tests/run-cash-concurrency.mjs /private/tmp/financetracker-concurrency-runtime/node_modules/embedded-postgres/dist/index.js
+npm ci
+npm run build
+FT_NATIVE_RUNTIME="$(mktemp -d)"
+npm install --prefix "$FT_NATIVE_RUNTIME" --no-save --package-lock=false embedded-postgres@18.4.0-beta.17
+node supabase/tests/run-cash-concurrency.mjs "$FT_NATIVE_RUNTIME/node_modules/embedded-postgres/dist/index.js" --b1 --audit
 ```
 
 Lascia abilitati gli script di installazione del runtime: ripristinano i symlink
@@ -495,9 +525,8 @@ non lascia una ricevuta né una nuova transazione parziale.
 originale e data di creazione. RLS autorizza solo la lettura del proprietario;
 INSERT/UPDATE/DELETE diretti sono revocati ad authenticated. Le ricevute sono
 immutabili, e il FK impedisce di cancellare una transazione referenziata: la chiave
-non può diventare riutilizzabile per ricreare un movimento. Questa restrizione
-riguarda solo i movimenti creati dal nuovo percorso RPC; una futura cancellazione
-avrà bisogno di un modello esplicito che preservi la ricevuta. Il payload è quello
+non può diventare riutilizzabile per ricreare un movimento. Con 008 tutti i movimenti usano annullamento logico e il DELETE fisico è vietato;
+le ricevute B1 restano immutabili anche dopo una correzione o un annullamento. Il payload è quello
 dell'operazione originaria, non un saldo memorizzato o un motore di aggiornamento
 retroattivo dei movimenti.
 
@@ -546,8 +575,8 @@ Fuori copertura:
 npm test
 npm run typecheck
 npm run build
-node supabase/tests/run-account-balances.mjs /private/tmp/financetracker-sql-runtime/node_modules/@electric-sql/pglite/dist/index.js
-node supabase/tests/run-cash-concurrency.mjs /private/tmp/financetracker-concurrency-runtime/node_modules/embedded-postgres/dist/index.js --b1 --audit
+node supabase/tests/run-account-balances.mjs "$FT_SQL_RUNTIME/node_modules/@electric-sql/pglite/dist/index.js"
+node supabase/tests/run-cash-concurrency.mjs "$FT_NATIVE_RUNTIME/node_modules/embedded-postgres/dist/index.js" --b1 --audit
 ```
 
 I runtime temporanei e i limiti dell'Auth locale sono descritti sopra. Il runner

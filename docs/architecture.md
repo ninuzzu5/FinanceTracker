@@ -23,7 +23,7 @@ Il parser rifiuta zero, segni anche Unicode attorno alla valuta, più importi, s
 
 ## Persistenza, proprietà e B1
 
-`persistence.ts` definisce contratto, validazione/mapping ed errori; `supabase.ts` implementa transazioni, ricevute, storico e riconciliazione. Usa chiave pubblica, signInWithPassword, sessione in memoria e getUser per verificarne il proprietario. Fetch limitato a 15 secondi; niente service role. Configurazione richiesta anche per le letture di storico/ricevute, non solo al salvataggio.
+`persistence.ts` definisce contratto, validazione/mapping ed errori; `supabase.ts` implementa transazioni, ricevute, storico e riconciliazione. Usa chiave pubblica, signInWithPassword, sessione in memoria e getUser per verificarne il proprietario. Fetch limitato a 15 secondi; niente service role. Configurazione richiesta anche per le letture di storico/ricevute, non solo al salvataggio. Endpoint remoti HTTPS senza userinfo; HTTP limitato alle autorità loopback esplicite localhost/127.0.0.1/[::1], con porta opzionale e controllo prima della normalizzazione WHATWG per rifiutare forme ambigue. Errori di configurazione sintetici.
 
 `save_transaction_once` risolve gli UUID dei conti attivi posseduti, verificando nomi univoci ed EUR, e inserisce movimento e ricevuta atomicamente. L'importo validato dal dominio passa alla RPC come stringa decimale esatta. Spesa: from_account_id; entrata: to_account_id; trasferimento: entrambi e categoria NULL. Nessuna operazione presso le banche.
 
@@ -66,3 +66,9 @@ manage_transaction_once autentica auth.uid, serializza per proprietario/chiave, 
 UPDATE/DELETE diretti sono revocati ad authenticated; un nuovo trigger richiede versione incrementale e snapshot di audit coerenti per UPDATE, stato iniziale valido per INSERT e vieta DELETE. RLS sul registro consente solo letture proprie; scritture riservate alla RPC SECURITY DEFINER con search_path vuoto e owner esplicito. Le ricevute 006 non vengono modificate: un replay originario recupera lo stesso ID anche dopo correzione/annullamento. Chiavi delle correzioni e B1 hanno registri e namespace di lock separati.
 
 Dopo timeout l'editor congela chiave/payload; stesso pulsante ritenta. Dopo riavvio il pulsante con chiave può solo leggere get_transaction_change_receipt: niente ricostruzione della scrittura. La bozza non è persistente. Dettagli in [guida B/C](milestones-b-c.md).
+
+## Verifica pre-release e manutenzione
+
+La CI ordinaria include audit npm completo/produttivo. Il job SQL Linux è predisposto per avvio manuale fino alla qualificazione su runner pulito, poi potrà essere promosso a controllo automatico con una revisione separata. Gli snapshot del runner PGlite confrontano valori SQL testuali e ordine esplicito, preservando anche le date infinite legacy su Node 22 e 24.
+
+UX-01 resta un difetto confermato accettato per la v1 personale: gli edit di messaggi estranei possono compilare campi del flusso attivo. Le conferme esplicite limitano il rischio; non modificare vecchi messaggi durante un input e verificare il riepilogo. La correzione è rinviata. Revisione mirata, raccomandazioni strutturali e limiti della verifica in [hardening pre-release](hardening-2026-10-19.md).
