@@ -6,7 +6,7 @@ on:
       - main
       - dev
   pull_request:
-  # Linux SQL qualification is manual until its setup has passed on a clean runner.
+  # SQL qualification runs on dev pushes and manual dispatch while Linux is qualified.
   workflow_dispatch:
 
 permissions:
@@ -47,8 +47,8 @@ jobs:
         run: npm audit --omit=dev
 
   sql-qualification:
-    name: Manual Linux SQL qualification (not yet a required check)
-    if: github.event_name == 'workflow_dispatch'
+    name: Linux SQL qualification (not yet a required check)
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/dev')
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
