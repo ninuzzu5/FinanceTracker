@@ -1,6 +1,6 @@
 # Architettura attuale
 
-Fonte di verità: codice del branch `dev` e migrazioni versionate. La presenza dei file SQL non dimostra che siano applicati sul database remoto. Per l'operatività vedi [guida Telegram](bot-guide.md) e [Supabase](../supabase/README.md).
+L’architettura descritta corrisponde al codice del branch `dev` e alle migrazioni versionate. La presenza dei file SQL non dimostra che siano applicati sul database remoto. Per l'operatività vedi [guida Telegram](bot-guide.md) e [Supabase](../supabase/README.md).
 
 ## Dominio deterministico
 
@@ -49,7 +49,7 @@ Chiusura blocca INSERT/UPDATE/DELETE che coinvolgono Contanti fino a quella data
 
 Dashboard in `apps/web` non implementata: leggerà Supabase autenticato; niente dataset demo parallelo. Stack web e realtime sono ipotesi, non contratti attuali. created_at/updated_at sono istanti UTC e non compaiono nel bot; una futura UI dovrà formattarli esplicitamente nel fuso desiderato. transaction_date resta una data.
 
-APP_TIMEZONE diverso da Europe/Rome può divergere dalla riconciliazione: uniformare questo contratto in una task dedicata. Mancano gestione aperture via bot, riaperture/cambio tipo e storico rettifiche. Stato UX multiistanza, snapshot dello storico e indici per ledger grandi richiedono valutazione separata.
+APP_TIMEZONE diverso da Europe/Rome può divergere dalla riconciliazione: uniformare questo contratto in un intervento dedicato. Mancano gestione aperture via bot, riaperture/cambio tipo e storico rettifiche. Stato UX multiistanza, snapshot dello storico e indici per ledger grandi richiedono valutazione separata.
 
 Vitest usa servizi simulati; runner SQL separati applicano migrazioni in database sintetici isolati con RLS/trigger/vincoli attivi. PostgreSQL nativo verifica lock e concorrenza; Auth locale minimo non certifica Auth/JWT, catalogo o rete Supabase remoti.
 
@@ -69,6 +69,6 @@ Dopo timeout l'editor congela chiave/payload; stesso pulsante ritenta. Dopo riav
 
 ## Verifica pre-release e manutenzione
 
-La CI ordinaria include audit npm completo/produttivo. Il job SQL Linux è predisposto per avvio manuale fino alla qualificazione su runner pulito, poi potrà essere promosso a controllo automatico con una revisione separata. Gli snapshot del runner PGlite confrontano valori SQL testuali e ordine esplicito, preservando anche le date infinite legacy su Node 22 e 24.
+La CI include automaticamente test applicativi, audit npm completo/produttivo e SQL/concorrenza sui push dev/main e PR verso questi branch, oltre all’avvio manuale. Due check indipendenti: `test` e `SQL integration`, su Ubuntu 24.04 e Node applicativo 22. La [guida CI](ci.md) distingue la qualificazione precedente dalla nuova configurazione ancora da eseguire su GitHub. Gli snapshot del runner PGlite confrontano valori SQL testuali e ordine esplicito, preservando anche le date infinite legacy su Node 22 e 24.
 
 UX-01 resta un difetto confermato accettato per la v1 personale: gli edit di messaggi estranei possono compilare campi del flusso attivo. Le conferme esplicite limitano il rischio; non modificare vecchi messaggi durante un input e verificare il riepilogo. La correzione è rinviata. Revisione mirata, raccomandazioni strutturali e limiti della verifica in [hardening pre-release](hardening-2026-10-19.md).

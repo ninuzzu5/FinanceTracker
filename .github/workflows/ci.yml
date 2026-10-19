@@ -6,7 +6,9 @@ on:
       - main
       - dev
   pull_request:
-  # SQL qualification runs on dev pushes and manual dispatch while Linux is qualified.
+    branches:
+      - main
+      - dev
   workflow_dispatch:
 
 permissions:
@@ -14,16 +16,16 @@ permissions:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - name: Checkout
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (Node 24 action runtime)
         with:
           persist-credentials: false
 
       - name: Set up Node.js
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0 (Node 24 action runtime)
         with:
           node-version: 22
           cache: npm
@@ -47,18 +49,17 @@ jobs:
         run: npm audit --omit=dev
 
   sql-qualification:
-    name: Linux SQL qualification (not yet a required check)
-    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/dev')
-    runs-on: ubuntu-latest
+    name: SQL integration
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - name: Checkout
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (Node 24 action runtime)
         with:
           persist-credentials: false
 
       - name: Set up Node.js
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0 (Node 24 action runtime)
         with:
           node-version: 22
           cache: npm

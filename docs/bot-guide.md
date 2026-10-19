@@ -44,9 +44,9 @@ npm audit --omit=dev
 npm audit --include=dev
 ```
 
-La CI ordinaria include questi controlli e audit completo. SQL/concorrenza sono anche predisposti come qualificazione Linux manuale nel workflow, non ancora obbligatoria: [setup e limiti](../supabase/README.md#ci-e-qualificazione-linux).
+La CI include questi controlli, audit completo e suite SQL/concorrenza sui push dev/main e PR verso questi branch. Setup locale e limiti nella [guida CI](ci.md) e nella [guida Supabase](../supabase/README.md#ci-e-qualificazione-linux).
 
-**Rischio noto UX-01, accettato per la v1 personale:** mentre il bot attende un campo del wizard, dell'editor o della riconciliazione, non modificare messaggi estranei nella chat; invia una nuova risposta e controlla l'anteprima. Un edit estraneo può compilare il campo attivo. La conferma resta necessaria; questo difetto non è corretto dalla task di hardening.
+**Rischio noto UX-01, accettato per la v1 personale:** mentre il bot attende un campo del wizard, dell'editor o della riconciliazione, non modificare messaggi estranei nella chat; invia una nuova risposta e controlla l'anteprima. Un edit estraneo può compilare il campo attivo. La conferma resta necessaria; l’hardening non ha corretto questo difetto.
 
 Gli endpoint Supabase remoti richiedono HTTPS e non possono contenere userinfo. HTTP è consentito solo per `localhost`, `127.0.0.1` o `[::1]` espliciti, con porta opzionale, per sviluppo locale.
 
@@ -214,7 +214,7 @@ Esegui questi controlli esclusivamente su un progetto di test con dati sintetici
 5. Annulla una nuova proposta: nessuna riga aggiunta. Ripremi un vecchio pulsante Conferma: nessun nuovo INSERT.
 6. Facoltativamente, nel solo ambiente di test usa temporaneamente credenziali errate e riavvia: la lettura preventiva della ricevuta deve bloccare la nuova anteprima con errore leggibile, senza falso successo o scritture. Ripristina la configurazione privata prima di proseguire.
 
-In caso di risposta DB persa, usa Riprova stessa operazione con la stessa chiave; non copiare il testo in un nuovo messaggio. Annulla non cancella scritture dall’esito incerto. Se l'INSERT riesce ma la risposta Telegram fallisce, la riga resta salvata. Il collaudo reale non fa parte della suite automatica e non è stato eseguito dall'agente.
+In caso di risposta DB persa, usa Riprova stessa operazione con la stessa chiave; non copiare il testo in un nuovo messaggio. Annulla non cancella scritture dall’esito incerto. Se l'INSERT riesce ma la risposta Telegram fallisce, la riga resta salvata. Il collaudo reale non fa parte della suite automatica e non è stato eseguito durante queste verifiche.
 
 
 ## Contanti
@@ -362,7 +362,7 @@ Un trasferimento è una sola riga con origine → destinazione; non ha categoria
 segno di entrata/uscita. Entrate e uscite mostrano +/− e categoria. Le rettifiche
 Contanti stanno in `account_adjustments` e **non** vengono mescolate allo storico
 delle transazioni o rappresentate come spese/entrate fittizie; lo storico lo
-precisa. Questa task non aggiunge uno storico dedicato delle rettifiche.
+precisa. Non è stato aggiunto uno storico dedicato delle rettifiche.
 
 Le callback di pagina hanno sessione e revisione; pagine non valide, letture in
 corso, scadenza, nuova operazione o riavvio impediscono navigazioni obsolete.
@@ -385,7 +385,7 @@ Una lettura fallita invita a riaprire `/movimenti`. Con 008 ogni riga offre il d
 - Nessun indice nuovo: limit e cursore evitano offset/download, ma grandi ledger
   possono richiedere un futuro indice su user_id/transaction_date/id. Le FK e il
   supporto PostgREST al cast testuale devono essere quelli della baseline. Il
-  catalogo remoto e Auth reale non sono stati interrogati durante questa task.
+  catalogo remoto e Auth reale non sono stati interrogati durante questa revisione.
 - L'aggiornamento del menu Telegram avviene quando si avvia il bot aggiornato;
   non è stato eseguito su Telegram durante lo sviluppo. Non sono stati letti token.
 
@@ -435,7 +435,7 @@ transaction_date è una data in APP_TIMEZONE; created_at è un istante timestamp
 non mostrato nel bot. 17:08 UTC e 19:08 Europe/Rome durante l’ora legale sono lo
 stesso istante: non cambiare timezone del database o aggiungere ore ai dati.
 La riconciliazione usa Europe/Rome fisso: mantieni il fuso predefinito per coerenza;
-l’unificazione con APP_TIMEZONE diverso richiede una task separata.
+l’unificazione con APP_TIMEZONE diverso richiede un intervento separato.
 
 Le aperture sono configurate manualmente, non tramite wizard. `/saldi` legge
 get_account_balances per tutti i conti del proprietario, mentre `/riconcilia`

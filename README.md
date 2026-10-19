@@ -15,7 +15,7 @@ Implementati sul codice di `dev`:
 - Aperture manuali e RPC dei saldi teorici; `/riconcilia` registra rettifiche Contanti a fine giornata e protegge le giornate chiuse.
 - B1: salvataggio atomico e idempotenza persistente per operazione; B2/B3: importi/date validi e conti EUR; B4/B5: rifiuto di importi con segno e trasferimenti ambigui.
 
-Queste funzionalità richiedono lo schema corrispondente alle migrazioni locali fino a 008. **L'allineamento del database remoto non è verificato da questa revisione.** Dashboard, budget, statistiche, realtime, riapertura delle giornate e correzioni retroattive avanzate restano da sviluppare.
+Queste funzionalità richiedono lo schema corrispondente alle migrazioni locali fino a 008. **L’allineamento del database remoto non è stato verificato in questa revisione.** Dashboard, budget, statistiche, realtime, riapertura delle giornate e correzioni retroattive avanzate restano da sviluppare.
 
 ```text
 Testo libero o wizard → parsing/classificazione → anteprima e modifiche
@@ -71,9 +71,9 @@ Auth e conti vanno predisposti manualmente: UUID risolti da nomi attivi univoci 
 
 `npm test` esegue Vitest nei workspace bot/dominio, con dati sintetici e servizi simulati. `build` compila entrambi; `typecheck` compila prima il dominio e controlla i workspace. Nessuno di questi comandi testa Supabase remoto. I runner SQL e stress sono separati da Vitest: setup nella [guida Supabase](supabase/README.md#ci-e-qualificazione-linux).
 
-Il workflow GitHub Actions preparato esegue su push a `main`/`dev` e pull request: `npm ci`, build, typecheck, test, `npm audit` completo e `npm audit --omit=dev` su Node 22. Tutti gli errori falliscono il job. Le Actions sono vincolate a SHA completi, con `contents: read` e senza credenziali Git persistite.
+La CI esegue due check, **`test`** e **`SQL integration`**, sui push a `dev`/`main`, sulle PR dirette a questi branch e con `workflow_dispatch`. Include build, typecheck, test applicativi, audit npm completo/produttivo, PGlite e concorrenza PostgreSQL nativa su dati sintetici. Tutti i fallimenti rendono rosso il rispettivo job. Runner `ubuntu-24.04`, Node 22 per l’applicazione e Actions stabili con runtime interno Node 24, vincolate a SHA completi.
 
-La **qualificazione SQL Linux** (PGlite e PostgreSQL nativo isolato) è abilitata sui push a `dev` e tramite `workflow_dispatch`, senza attivazione automatica sui push a `main` o sulle PR. Questa estensione serve a provare il setup su un runner Linux pulito: l'esito Linux resta da verificare nei run GitHub Actions e il job non è ancora un required check della release. Non vengono usati dati reali, credenziali Supabase, segreti configurati o deploy. Il [resoconto del hardening](docs/hardening-2026-10-19.md) conserva le evidenze locali precedenti a questa abilitazione.
+La precedente suite SQL è passata su Linux al commit `7464879fe6e1be5c07002b2584cf08825ac8f867`, in base all’esito riportato; **la nuova definizione deve ancora essere eseguita su GitHub**. Una CI verde non sostituisce collaudo Supabase/Telegram reale, verifica del catalogo remoto o prova di backup/ripristino. [Guida CI](docs/ci.md): check da rendere obbligatori, interpretazione dei fallimenti e comandi locali.
 
 Il [report pre-release](docs/audit-v1-2026-10-17.md) conserva evidenze e rischi residui. UX-01 rimane un rischio noto accettato per la v1 personale: durante wizard, modifica e riconciliazione, invia nuove risposte invece di modificare messaggi estranei e controlla il riepilogo prima di confermare. OPS-01 resta aperto fino alla prova manuale di backup/ripristino.
 
@@ -83,7 +83,7 @@ L'idempotenza copre la stessa fonte/chiave tramite RPC, non inserimenti diretti 
 
 Credenziali, messaggi grezzi, export e dati personali restano fuori da Git. Il database conserva valori contabili e chiavi opache, senza messaggi Telegram grezzi. I log riportano errori sintetici. Una scrittura riuscita rimane persistita anche se Telegram non consegna la risposta.
 
-Per migrazione 008, limiti e collaudo Telegram delle Milestone B/C: [guida operativa](docs/milestones-b-c.md). Queste milestone non costituiscono una dichiarazione di Release v1 completata.
+Per migrazione 008, limiti e collaudo Telegram delle Milestone B/C: [guida operativa](docs/milestones-b-c.md). Il completamento di queste milestone non implica che la Release v1 sia pronta.
 
 ## Sviluppi futuri
 

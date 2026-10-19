@@ -1,5 +1,7 @@
 # Hardening pre-release — 19 ottobre 2026
 
+> Nota storica: le sezioni sulla qualificazione manuale descrivono la preparazione iniziale. È stato successivamente riportato il successo della CI Linux su `7464879fe6e1be5c07002b2584cf08825ac8f867`. La configurazione finale locale abilita entrambi i check su push dev/main e PR verso questi branch; il nuovo workflow deve ancora essere eseguito su GitHub. Per lo stato corrente e le procedure, consultare la [guida CI](ci.md). Le evidenze originali sono conservate di seguito.
+
 Modifiche locali sul branch `dev`, base `c489fa158c272c9d4071d669655a1fe0c0edc97e`. Nessun commit, push, branch, PR, merge, tag o deploy. Migrazioni 001–008, contratti RPC, dati reali e credenziali non modificati. Nessun accesso a Supabase/Telegram remoti o a `.env.local`.
 
 Questo documento registra il seguito dell’[audit del 17 ottobre](audit-v1-2026-10-17.md), senza dichiarare completata la release.
@@ -11,8 +13,8 @@ Questo documento registra il seguito dell’[audit del 17 ottobre](audit-v1-2026
 | SEC-01 | Corretto localmente: Vitest/mocker 4.1.12, Tinypool rimosso, source-map-js 1.2.2; zero advisory negli audit completo e produttivo | Ripetere audit e verifiche sul commit finale; gli advisory possono cambiare |
 | SEC-02 | Corretto e verificato con 46 nuovi casi di test | Nessuna verifica della configurazione privata o della rete hosted |
 | QA-01 | Parziale: audit automatici e qualificazione SQL Linux manuale predisposti, errori non soppressi | Runner Linux pulito non disponibile; nessuna prova hosted della nuova CI e nessun required check SQL attivato |
-| SEC-03 | Corretto nella definizione locale: SHA completi ufficiali e actionlint superato | Esecuzione hosted da verificare dopo revisione e pubblicazione autorizzata |
-| UX-01 | Rischio noto accettato dall’owner per la v1 personale | Difetto confermato, non corretto; usare nuove risposte nei flussi e controllare la preview |
+| SEC-03 | Corretto nella definizione locale: SHA completi ufficiali e actionlint superato | Esecuzione hosted da verificare dopo revisione e pubblicazione |
+| UX-01 | Rischio noto accettato per la v1 personale | Difetto confermato, non corretto; usare nuove risposte nei flussi e controllare la preview |
 | OPS-01 | Aperto | Prova manuale di backup/ripristino ancora necessaria |
 
 ## Dipendenze e compatibilità
@@ -35,7 +37,7 @@ Sono rifiutati userinfo anche vuoto (`@host`), username/password incorporate, wh
 
 Il job ordinario, su push a `main`/`dev` e PR, eseguirà `npm ci`, build, typecheck, test, `npm audit` e `npm audit --omit=dev` con Node 22. Nessuna soglia che nasconda advisory, `continue-on-error` o `|| true`.
 
-Per la richiesta esplicita di provare il setup Linux prima di renderlo obbligatorio, e in assenza di Linux disponibile confermata dall’owner, il job `sql-qualification` viene eseguito solo tramite **workflow_dispatch**. Prepara due runtime con versioni esplicite sotto `RUNNER_TEMP`:
+In questa fase non era disponibile un runner Linux: per provare il setup prima di renderlo obbligatorio, il job `sql-qualification` era limitato a **workflow_dispatch**. Prepara due runtime con versioni esplicite sotto `RUNNER_TEMP`:
 
 1. PGlite 0.5.8, installato senza lifecycle script; runner delle migrazioni/fixture.
 2. Embedded PostgreSQL 18.4.0-beta.17, script di installazione abilitati per i symlink dei binari; runner completo `--b1 --audit` dopo la build del bot.
@@ -53,7 +55,7 @@ Verificate contro le [release ufficiali checkout](https://github.com/actions/che
 
 ### Passaggio a SQL automatico/obbligatorio
 
-Dopo la revisione e una pubblicazione autorizzata, avviare manualmente la qualificazione sulla revisione da validare. La [documentazione GitHub](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/manually-run-a-workflow) richiede che il workflow con `workflow_dispatch` sia disponibile sul branch predefinito per offrirne l’avvio manuale: pianificare la qualificazione prima del tag, senza presumere che sia già eseguibile dal solo checkout locale.
+Dopo la revisione e una pubblicazione, avviare manualmente la qualificazione sulla revisione da validare. La [documentazione GitHub](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/manually-run-a-workflow) richiede che il workflow con `workflow_dispatch` sia disponibile sul branch predefinito per offrirne l’avvio manuale: pianificare la qualificazione prima del tag, senza presumere che sia già eseguibile dal solo checkout locale.
 
 Registrare SHA, runner Linux, Node/npm, versioni runtime, risultati e assenza di segreti applicativi. Dopo una prova pulita riuscita e revisionata, rendere almeno PGlite automatico in una modifica separata e valutare il required check. La configurazione di branch protection non è stata modificata. Se il nativo non risulta stabile su Linux, documentare il motivo e mantenere un gate manuale locale riproducibile; non introdurre eccezioni silenziose.
 
@@ -76,9 +78,9 @@ Il controllo TypeScript con `--noUnusedLocals --noUnusedParameters` passa per do
 | --- | --- | --- |
 | P1 | Qualificazione Linux e prova backup/restore | Mancano evidenze di release; nessun refactoring può sostituirle |
 | P2 | Riprendere UX-01 e il contratto di instradamento nuovi messaggi/edit | Difetto reale accettato per v1 personale; eventuale correzione con test di delivery e replay |
-| P2 | Separare gradualmente dispatch dei flussi e gestione della consegna in `proposal-flow.ts` / `flow-delivery.ts` | Molti percorsi di stato condivisi; richiede una task dedicata con invarianti di callback, pannelli e retry |
+| P2 | Separare gradualmente dispatch dei flussi e gestione della consegna in `proposal-flow.ts` / `flow-delivery.ts` | Molti percorsi di stato condivisi; richiede un intervento dedicato che preservi le invarianti di callback, pannelli e retry |
 | P3 | Valutare suddivisione del repository Supabase e uniformità degli errori | Utile se crescono i percorsi; ora le differenze fra ricevute, cash e management hanno semantica da preservare |
-| P3 | Ridurre duplicazione delle guide storiche e misurare query prima di aggiungere indici | Conservare evidenze e compatibilità; nessuna giustificazione per riscritture o indici preventivi in questa task |
+| P3 | Ridurre duplicazione delle guide storiche e misurare query prima di aggiungere indici | Conservare evidenze e compatibilità; nessuna giustificazione per riscritture o indici preventivi durante l’hardening |
 
 `packages/domain`, bot e schema mantengono responsabilità distinte; `apps/web` e `model` restano documentazione di sviluppi futuri. `.gitignore` e licenza MIT sono stati revisionati e non richiedono cambiamenti in questo intervento. Non è stata ripetuta una scansione completa della cronologia: valgono i limiti euristici dell’audit originale. Nessuna verifica legale completa delle dipendenze o degli artefatti ignorati.
 
@@ -104,7 +106,7 @@ Il primo tentativo PGlite con Node 22 è fallito per il confronto degli `Invalid
 
 Non eseguiti: runner Linux pulito, nuova CI hosted, branch protection/required checks, servizi Supabase/Telegram reali, prova di backup/restore. I runtime SQL temporanei locali sono quelli delle versioni indicate nelle guide; l’installazione su un runner Linux pulito resta parte della qualificazione da fare.
 
-## File locali da revisionare
+## File modificati durante l’hardening
 
 - Dipendenze/metadati: `package.json`, `package-lock.json`, `apps/bot/package.json`, `packages/domain/package.json`.
 - Configurazione e regressioni: `apps/bot/src/supabase.ts`, nuovo `apps/bot/test/supabase-config.test.ts`.
@@ -112,4 +114,4 @@ Non eseguiti: runner Linux pulito, nuova CI hosted, branch protection/required c
 - Documentazione: `README.md`, `SECURITY.md`, `docs/architecture.md`, `docs/bot-guide.md`, `supabase/README.md`, `apps/web/README.md`.
 - Report: `docs/audit-v1-2026-10-17.md` e questo documento.
 
-Il report del 17 ottobre era già non tracciato all’inizio della task: è stato aggiornato senza aggiungerlo all’indice. Tutte le modifiche restano locali per la revisione. Nessuna release dichiarata pronta sulla sola base di questi controlli.
+All’inizio dell’hardening il report del 17 ottobre non era ancora tracciato; è stato aggiornato senza aggiungerlo all’indice. Al termine dell’intervento tutte le modifiche erano locali e da revisionare. Questi controlli, da soli, non erano sufficienti a dichiarare pronta la release.

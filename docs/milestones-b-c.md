@@ -1,6 +1,6 @@
 # Milestone B/C — saldi e gestione dei movimenti
 
-Implementate sul codice `dev`; l’utente ha comunicato l’applicazione riuscita di 008 su Supabase. Questa rifinitura UX non interroga il database remoto, non riesegue migrazioni e non dichiara completata la Release v1. Tutte le scritture automatiche di collaudo usano database temporanei e dati sintetici.
+Implementate sul branch `dev`. L’applicazione di 008 su Supabase è stata confermata, ma non verificata indipendentemente durante la rifinitura UX. L’intervento non ha interrogato il database remoto né rieseguito migrazioni e non ha concluso la Release v1. Tutte le scritture automatiche di collaudo usano database temporanei e dati sintetici.
 
 ## Scelte e dipendenze
 
@@ -80,7 +80,7 @@ Solo progetto di test con schema 008 e aperture coerenti con il dataset; annotar
 8. In un ambiente di test con fault injection controllata perdere la risposta dopo commit: **Riprova stessa richiesta** deve recuperare il successo senza seconda correzione. Dopo riavvio il vecchio pulsante legge soltanto la ricevuta. Non simulare il fault nei dati reali o cambiando/disabilitando vincoli. Questa prova è già simulata localmente con repository/bot reali e ponte SQL.
 9. Per paginazione creare più di cinque movimenti sintetici, usare Avanti/Indietro e aprire un movimento della seconda pagina. Dopo modifica della data riaprire `/movimenti`: le pagine non sono uno snapshot congelato. Gli annullati restano elencati; le rettifiche non compaiono come entrate/uscite.
 
-Le date degli esempi sono esplicite: scegliere giornate appropriate alle aperture e ancora aperte nel dataset di test. Nessun esempio autorizza modifiche ai conti personali reali.
+Le date degli esempi sono esplicite: scegliere giornate appropriate alle aperture e ancora aperte nel dataset di test. Gli esempi sono destinati esclusivamente al dataset di test, non ai conti personali reali.
 
 ## Verifiche locali e limiti
 
@@ -101,7 +101,7 @@ Installazione runtime temporanei: [guida Supabase](../supabase/README.md#test-se
 - PostgreSQL nativo: suite audit/B1/B2/B3 e nuova suite B/C con 25 retry simultanei, 25 modifiche concorrenti incompatibili, annullamento contro modifica, chiusura contro correzioni di vecchi/nuovi riferimenti e rollback. Bot/repository effettivi con SDK sintetico perdono la risposta post-commit e recuperano la stessa ricevuta anche dopo reset dello stato.
 - Il controllo della proiezione RPC tramite SDK verifica il parametro PostgREST balance::text; non equivale a una prova HTTP su PostgREST ospitato.
 
-Da verificare durante Release v1: catalogo/grant/RLS effettivi del progetto di test, Auth/JWT reale con due utenti, cast testuale numeric via PostgREST, tempi/retry di rete, collaudo Telegram e backup/ripristino. Nessuno di questi controlli remoti è stato eseguito in questa task.
+Da verificare durante Release v1: catalogo/grant/RLS effettivi del progetto di test, Auth/JWT reale con due utenti, cast testuale numeric via PostgREST, tempi/retry di rete, collaudo Telegram e backup/ripristino. Nessuno di questi controlli remoti è stato eseguito durante la rifinitura UX.
 
 Restano fuori scope dashboard, cambio tipo, riapertura delle giornate, annullamento di rettifiche Contanti, UI dell'audit completo e persistenza delle bozze. Il dettaglio mostra lo stato corrente; le versioni precedenti sono consultabili nel registro tramite accesso autenticato. Le aperture restano manuali. APP_TIMEZONE diverso da Europe/Rome conserva la divergenza preesistente dei movimenti; `/saldi` e riconciliazione usano Europe/Rome. Lo storico incompatibile segnalato dal preflight non viene riparato automaticamente; non è gestibile dal bot finché non viene esaminato separatamente.
 
@@ -138,7 +138,7 @@ Restano fuori scope dashboard, cambio tipo, riapertura delle giornate, annullame
 - Un campo valido apre direttamente Prima/Dopo. **Conferma modifiche** e **Annulla operazione** sono distinti; **Modifica ancora** permette altri campi. Dopo successo, **Torna ai movimenti** effettua una nuova lettura. Request_id, payload congelato, versione e ricevute conservano le garanzie precedenti.
 - Le osservazioni Saldi sono messaggi autonomi con orario Europe/Rome, mai modificati dalla pulizia dei pannelli. Aggiorna crea una nuova osservazione e invalida i pulsanti precedenti. Non sono salvate come nuovi dati contabili: rimangono nella chat Telegram.
 - Per saldi l’invio Telegram ha un tentativo, senza reinvio automatico dopo esito incerto; gli update già gestiti sono ricordati fino a 1024 ID nel processo. Dopo riavvio quella memoria non è disponibile: non è promessa una consegna exactly-once. Le vecchie callback sono rifiutate, senza modificare il testo o la tastiera del vecchio saldo. In caso di mancata consegna usare esplicitamente un nuovo `/saldi`.
-- Migrazioni 001–008, repository e SQL contabile non modificati dalla rifinitura; annullamento, audit e saldi sono verificati nel codice/fixture già esistenti e nelle regressioni applicative. Nessuna esecuzione remota o riesecuzione della migrazione 008 in questa task.
+- Migrazioni 001–008, repository e SQL contabile non modificati dalla rifinitura; annullamento, audit e saldi sono verificati nel codice/fixture già esistenti e nelle regressioni applicative. Nessuna esecuzione remota o riesecuzione della migrazione 008 durante la rifinitura UX.
 
 Checklist aggiornata: [guida Telegram](bot-guide.md#collaudo-rapido-della-rifinitura-bc).
 

@@ -78,11 +78,11 @@ where type in ('expense', 'income')
 group by type;
 ```
 
-No rows means no NULL-category expense/income rows were found. If counts are returned, stop: 003 will fail until those rows are reviewed and corrected explicitly by the owner. Neither the query nor the migration changes or deletes any data automatically.
+No rows means no NULL-category expense/income rows were found. If counts are returned, stop: 003 will fail until those rows are reviewed and corrected explicitly by the data owner. Neither the query nor the migration changes or deletes any data automatically.
 
 Only for a legacy database with an incorrect `transactions_category_by_type_check`, after the preflight, apply `003_enforce_transaction_category.sql` once through the separately authorized database administration workflow. It drops only `transactions_category_by_type_check` and adds its corrected definition in one transactional ALTER TABLE. Adding the constraint validates all existing rows; concurrent incompatible writes before validation can still make it fail. A failure rolls back the replacement and preserves the previous constraint. Validation takes a table lock, so choose an appropriate maintenance window for a populated database.
 
-This task prepares the query and migration only: neither has been executed, and no database credentials are required to review these files. Existing-database migration history reconciliation remains separate work.
+This section documents the prepared query and migration; neither was executed as part of their preparation. Reviewing these files requires no database credentials. Reconciling the existing database’s migration history remains a separate step.
 
 ## Supabase authenticated access
 
@@ -92,34 +92,25 @@ Real values stay in the ignored `.env.local` file or private runtime environment
 
 ## Validation
 
-Normal application tests mock the SDK and never contact the real database. See [the bot guide](../docs/bot-guide.md) for manual application checks. The SQL runner applies 001/002/004/005/006/007/008, reruns balance/reconciliation/idempotency suites and tests history and integrity. Its assertions execute in disposable embedded PostgreSQL (PGlite), with a minimal local Supabase Auth contract. Hosted Supabase Auth and the remote catalog are not tested. The SQL runner is separate from the default Vitest suite. It is also prepared as a manual Linux qualification job in CI, pending a clean Linux run; it never reads credentials or connects to a remote database.
+Normal application tests mock the SDK and never contact the real database. See [the bot guide](../docs/bot-guide.md) for manual application checks. The SQL runner applies 001/002/004/005/006/007/008, reruns balance/reconciliation/idempotency suites and tests history and integrity. Its assertions execute in disposable embedded PostgreSQL (PGlite), with a minimal local Supabase Auth contract. Hosted Supabase Auth and the remote catalog are not tested. The SQL runner is separate from the default Vitest suite. It also runs in the SQL integration CI job on dev/main pushes and PRs targeting those branches; it never reads credentials or connects to a remote database.
 
 
 ## CI e qualificazione Linux
 
-Il workflow locale predisposto in `.github/workflows/ci.yml` eseguirà automaticamente installazione, build,
-typecheck, Vitest e audit npm completo/produttivo su Node 22. Le suite SQL sono
-preparate nel job `sql-qualification`, attivo soltanto con `workflow_dispatch`.
-Il job installa runtime con versioni esplicite sotto `RUNNER_TEMP`, compila il bot,
-esegue PGlite e poi PostgreSQL nativo con `--b1 --audit`. Nessun segreto configurato,
-credenziale Supabase, database preesistente o listener TCP. Un errore di setup o
-una asserzione fallita rende rosso il job: nessun `continue-on-error`.
+Il job `sql-qualification`, visualizzato come **SQL integration**, esegue PGlite
+e PostgreSQL nativo con `--b1 --audit` su tutti gli eventi della CI: push dev/main,
+PR verso dev/main e avvio manuale. Build del bot prima dell’integrazione, runtime
+con versioni esplicite sotto `RUNNER_TEMP`, nessun segreto applicativo o database
+remoto. Un errore di setup o un’asserzione fallita rende rosso il job.
 
-Il collaudo locale macOS/Node 22 non dimostra la riproducibilità Linux. In assenza
-di un runner Linux disponibile, la qualificazione resta manuale, come concordato;
-un verde del solo job applicativo non sostituisce il gate SQL della release.
-Dopo revisione e pubblicazione autorizzata del workflow, eseguirlo manualmente
-sul commit da qualificare in un runner GitHub pulito, registrare SHA, versioni e
-risultati, quindi valutare una PR separata che renda automatico/obbligatorio almeno
-PGlite. Per il nativo verificare permessi di esecuzione, symlink, memoria condivisa
-e socket Unix. Se il setup nativo è instabile su Linux, conservarlo come gate
-manuale locale, documentando il motivo senza sopprimere errori nel workflow.
+È stato riportato il successo su Linux della configurazione precedente al commit
+`7464879fe6e1be5c07002b2584cf08825ac8f867`. La nuova definizione usa Ubuntu 24.04
+esplicito e Actions aggiornate; il relativo run hosted resta da verificare.
+Vedi [guida CI](../docs/ci.md) per evidenze, required checks e gestione dei fallimenti.
 
-I comandi di setup locali nelle sezioni sotto usano `mktemp -d`, versioni uguali
-al workflow e dati sintetici. Non leggere `.env.local`. Il runner PGlite confronta
-snapshot SQL testuali ordinati, mantenendo distinti `infinity` e `-infinity`;
-questo evita il confronto di `Invalid Date` non portabile fra Node 22 e 24.
-Stato completo in [hardening pre-release](../docs/hardening-2026-10-19.md).
+I comandi locali sotto usano `mktemp -d` e fixture sintetiche senza leggere `.env.local`.
+Il runner PGlite confronta snapshot SQL testuali ordinati, mantenendo distinti
+`infinity` e `-infinity`, senza confronti di `Invalid Date` dipendenti dalla versione Node.
 
 ## Configurazione manuale del conto Contanti
 
@@ -474,7 +465,7 @@ anche una riga storica con precisione non compatibile rimanga identica.
 
 3. Verifica che 005 sia installata, RLS attiva, ownership e vincoli coerenti con
    001/002/005 e che gli oggetti 006 siano assenti. Il catalogo remoto non è stato
-   verificato da questa task. Se è diverso, fermati e confrontalo; non cancellare
+   verificato durante questa revisione. Se è diverso, fermati e confrontalo; non cancellare
    oggetti e non rilanciare le migrazioni baseline.
 4. Prova prima in un progetto Supabase di test separato. Poi, con un amministratore
    fidato, incolla ed esegui **l'intero file 006**, BEGIN/COMMIT inclusi, una sola
@@ -640,7 +631,7 @@ non utilizzare tali dati per denaro reale senza prima verificarli.
    non testo Telegram, credenziali o dettagli dei messaggi.
 2. Verifica presenza di 006, RLS/ownership/policy coerenti con 001/002/005/006 e
    assenza dei nuovi vincoli 007. Lo schema e i dati remoti **non sono stati
-   verificati** durante questa task. Se trovi differenze, confrontale prima di
+   verificati** durante questa revisione. Se trovi differenze, confrontale prima di
    procedere; non cancellare oggetti o rilanciare baseline.
 3. Esamina privatamente tutte le righe segnalate. Conti non EUR o trasferimenti
    tra valute differenti richiedono una decisione contabile esplicita: **fermarsi**,
@@ -680,7 +671,7 @@ salto primaverile, ora ripetuta autunnale e percorso Telegram→RPC.
 Criticità indipendente confermata dal codice: riconciliazione e relativa UI usano
 Europe/Rome fisso, mentre i movimenti consentono APP_TIMEZONE diverso. La
 configurazione predefinita è coerente; un altro fuso può produrre giornate diverse
-vicino a mezzanotte. Non è modificata in questa task. B4/B5 sono corretti nel parser; la UX attuale verifica preventivamente le
+vicino a mezzanotte. La divergenza non è stata modificata da questo intervento. B4/B5 sono corretti nel parser; la UX attuale verifica preventivamente le
 ricevute B1 e invalida le fonti modificate. La divergenza di fuso resta aperta.
 
 ### Test locali
