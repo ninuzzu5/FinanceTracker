@@ -10,7 +10,7 @@ import { ProposalStore, categoriesFor, type Proposal } from "./proposals.js";
 import { backKeyboard, choicesKeyboard, fieldKeyboard, proposalKeyboard, proposalText, type InlineKeyboard } from "./proposal-view.js";
 import { PersistenceError, persistenceMessage } from "./persistence.js";
 import { cashInput, reconciliationView, reconciliationMessage, ReconciliationError, type CashPreview, type CashReceipt, type CashRequest } from "./reconciliation.js";
-import { expandOperationKey } from "./operation-key.js";
+import { expandOperationKey, sourceOperationKey } from "./operation-key.js";
 import { GuidedEntry } from "./wizard.js";
 
 export type FlowEffect =
@@ -44,20 +44,28 @@ export class ProposalFlow {
 
   isSaving(chatId: number): boolean { return this.saving.has(chatId); }
 
+  isProposalSource(chatId: number, messageId: number): boolean {
+    // Guided proposals inherit the menu's source key without a sourceMessageId.
+    return this.store.get(chatId)?.requestId === sourceOperationKey(chatId, messageId);
+  }
+
   handle(update: unknown, config: TelegramConfig, now = new Date()): FlowEffect[] {
     if (!isRecord(update) || updateId(update) === undefined) return [];
     if ("callback_query" in update) return this.callback(update.callback_query, config, now);
     const decision = decideUpdate(update, config, now);
     if (decision.kind === "ignore") return [];
-    if (this.saving.has(decision.chatId)) return [send(decision.chatId, "Salvataggio in corso. Aspetta la conferma.")];
     const message = (update.message ?? update.edited_message) as { message_id: number; text: string };
+    // An edit may reparse its active proposal, but is never a new field reply.
+    // Unknown sources (including after restart) need a durable receipt in delivery.
+    if ("edited_message" in update && !this.isProposalSource(decision.chatId, message.message_id)) return [];
+    if (this.saving.has(decision.chatId)) return [send(decision.chatId, "Salvataggio in corso. Aspetta la conferma.")];
     const pendingProposal = this.store.get(decision.chatId);
-    if (pendingProposal?.submitted && "edited_message" in update && pendingProposal.sourceMessageId === message.message_id)
+    if (pendingProposal?.submitted && "edited_message" in update)
       return [send(decision.chatId, "Il salvataggio è già stato tentato. Usa Conferma per recuperare la stessa operazione; non modificare la fonte finché l’esito è incerto.")];
     const command = commandName(message.text);
     if (command) {
       if (command === "help") {
-        if ("edited_message" in update && pendingProposal?.sourceMessageId === message.message_id) this.store.remove(decision.chatId);
+        if ("edited_message" in update) this.store.remove(decision.chatId);
         return [send(decision.chatId, decision.kind === "help" ? decision.reply : "Usa /menu per iniziare.")];
       }
       if (command === "saldi") {
@@ -114,7 +122,7 @@ export class ProposalFlow {
     }
     if (decision.kind === "reject") {
       // An invalid edit of the active source must not leave its old values confirmable.
-      if ("edited_message" in update && p?.sourceMessageId === message.message_id) this.store.remove(decision.chatId);
+      if ("edited_message" in update) this.store.remove(decision.chatId);
       return [send(decision.chatId, decision.reply)];
     }
     const transaction = decision.transaction;

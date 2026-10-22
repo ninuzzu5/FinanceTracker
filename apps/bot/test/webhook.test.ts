@@ -34,11 +34,15 @@ describe("webhook regression", () => {
     expect(JSON.parse(calls[2][1]?.body as string)).toHaveProperty("reply_markup.inline_keyboard", []);
     expect(JSON.parse(calls[3][1]?.body as string).text).toContain("Transazione registrata");
   });
-  it("replies to an authorized edit using the corrected date and account", async () => {
+  it("replies to an authorized edit of the active source using the corrected date and account", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-09-18T12:00:00Z"));
     const res = response();
-    await handler({ method: "POST", headers, body: { update_id: 2, edited_message: {
+    await handler({ method: "POST", headers, body: { update_id: 202, message: {
+      message_id: 202, text: "12 tabacco revolut", chat: { id: 123456, type: "private" },
+    } } }, response());
+    vi.mocked(fetch).mockClear();
+    await handler({ method: "POST", headers, body: { update_id: 203, edited_message: {
       message_id: 202, text: "mercoledì barbiere 34€ isybank", chat: { id: 123456, type: "private" },
     } } }, res);
     expect(res.status).toHaveBeenCalledWith(200);

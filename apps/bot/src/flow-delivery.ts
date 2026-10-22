@@ -57,6 +57,9 @@ export async function deliverUpdate(
       noticeOnly = true;
       effects = [{kind:'send',chatId,text:'✅ Questo movimento risulta già registrato. Non è stata creata una nuova anteprima e il movimento salvato non è stato modificato.'}];
     } else if (!effects) {
+      // Recheck after the asynchronous receipt lookup: the active flow may have changed.
+      // Receipt-less edits must belong to the current proposal, not just a known ID.
+      if (isRecord(update) && 'edited_message' in update && !flow.isProposalSource(chatId, sourceId)) return;
       const version = isRecord(update) ? update.update_id as number : 0;
       const previous = flow.sourceVersions.get(sourceId);
       // A superseded unsaved source cannot replace a newer session, even if an edit
@@ -66,8 +69,6 @@ export async function deliverUpdate(
       flow.latestSourceId = Math.max(flow.latestSourceId, sourceId);
       flow.sourceVersions.set(sourceId,version);
       if (flow.sourceVersions.size > 1024) flow.sourceVersions.delete(flow.sourceVersions.keys().next().value!);
-      const current = flow.store.get(chatId);
-      if (isRecord(update) && 'edited_message' in update && commandName(message.text) && current?.requestId === requestId && !current.submitted) flow.store.remove(chatId);
       effects = flow.handle(update,config);
     }
   } else effects = flow.handle(update, config);

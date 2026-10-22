@@ -75,7 +75,7 @@ La CI esegue due check, **`test`** e **`SQL integration`**, sui push a `dev`/`ma
 
 La precedente suite SQL è passata su Linux al commit `7464879fe6e1be5c07002b2584cf08825ac8f867`, in base all’esito riportato; **la nuova definizione deve ancora essere eseguita su GitHub**. Una CI verde non sostituisce collaudo Supabase/Telegram reale, verifica del catalogo remoto o prova di backup/ripristino. [Guida CI](docs/ci.md): check da rendere obbligatori, interpretazione dei fallimenti e comandi locali.
 
-Il [report pre-release](docs/audit-v1-2026-10-17.md) conserva evidenze e rischi residui. UX-01 rimane un rischio noto accettato per la v1 personale: durante wizard, modifica e riconciliazione, invia nuove risposte invece di modificare messaggi estranei e controlla il riepilogo prima di confermare. OPS-01 resta aperto fino alla prova manuale di backup/ripristino.
+Il [report pre-release](docs/audit-v1-2026-10-17.md) conserva evidenze e rischi residui. UX-01, accettato nella v1 personale, è corretto e verificato localmente il 22 ottobre 2026; la modifica non è ancora pubblicata. Gli edit estranei vengono ignorati nei flussi attivi; per compilare un campo invia una nuova risposta e controlla il riepilogo prima di confermare. OPS-01 resta aperto fino alla prova manuale di backup/ripristino.
 
 Bozze, pannelli e offset sono in memoria, con scadenza di 30 minuti per lo stato conversazionale. Riavviando si perdono le bozze; i pulsanti B1 possono recuperare una ricevuta, senza ricostruire un payload mancante. Il webhook non coordina lo stato UX fra più istanze.
 

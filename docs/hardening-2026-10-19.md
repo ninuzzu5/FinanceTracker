@@ -2,6 +2,8 @@
 
 > Nota storica: le sezioni sulla qualificazione manuale descrivono la preparazione iniziale. È stato successivamente riportato il successo della CI Linux su `7464879fe6e1be5c07002b2584cf08825ac8f867`. La configurazione finale locale abilita entrambi i check su push dev/main e PR verso questi branch; il nuovo workflow deve ancora essere eseguito su GitHub. Per lo stato corrente e le procedure, consultare la [guida CI](ci.md). Le evidenze originali sono conservate di seguito.
 
+> Seguito UX-01 — 22 ottobre 2026: la correzione successiva alla release è verificata localmente e descritta nell’[audit, sezione UX-01](audit-v1-2026-10-17.md#ux-01--modifiche-a-messaggi-estranei-consumate-come-risposte-al-campo-attivo). Le tabelle sotto conservano lo stato dell’hardening del 19 ottobre. La release pubblicata non è stata modificata.
+
 Modifiche locali sul branch `dev`, base `c489fa158c272c9d4071d669655a1fe0c0edc97e`. Nessun commit, push, branch, PR, merge, tag o deploy. Migrazioni 001–008, contratti RPC, dati reali e credenziali non modificati. Nessun accesso a Supabase/Telegram remoti o a `.env.local`.
 
 Questo documento registra il seguito dell’[audit del 17 ottobre](audit-v1-2026-10-17.md), senza dichiarare completata la release.

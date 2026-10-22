@@ -38,7 +38,7 @@ Le installazioni temporanee SQL restano quelle già qualificate: PGlite **0.5.8*
 
 ## Significato del risultato
 
-Una CI verde con **entrambi i job eseguiti** verifica la revisione selezionata rispetto a compilazione, tipi, test, advisory noti e contratti contabili locali: saldi, RLS/ownership sintetici, ricevute, correzioni, annullamenti, retry, concorrenza e rollback. Non dimostra assenza di ogni vulnerabilità e non certifica Auth/PostgREST o configurazione del database Supabase reale, consegna Telegram, backup/ripristino o completamento della release. UX-01 resta il rischio noto accettato; OPS-01 resta aperto.
+Una CI verde con **entrambi i job eseguiti** verifica la revisione selezionata rispetto a compilazione, tipi, test, advisory noti e contratti contabili locali: saldi, RLS/ownership sintetici, ricevute, correzioni, annullamenti, retry, concorrenza e rollback. Non dimostra assenza di ogni vulnerabilità e non certifica Auth/PostgREST o configurazione del database Supabase reale, consegna Telegram, backup/ripristino o completamento della release. UX-01, accettato nella v1 pubblicata, è corretto e verificato localmente il 22 ottobre 2026, con modifica ancora da pubblicare; OPS-01 resta aperto.
 
 In caso di fallimento aprire il primo step rosso:
 

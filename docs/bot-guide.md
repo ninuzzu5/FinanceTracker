@@ -46,7 +46,7 @@ npm audit --include=dev
 
 La CI include questi controlli, audit completo e suite SQL/concorrenza sui push dev/main e PR verso questi branch. Setup locale e limiti nella [guida CI](ci.md) e nella [guida Supabase](../supabase/README.md#ci-e-qualificazione-linux).
 
-**Rischio noto UX-01, accettato per la v1 personale:** mentre il bot attende un campo del wizard, dell'editor o della riconciliazione, non modificare messaggi estranei nella chat; invia una nuova risposta e controlla l'anteprima. Un edit estraneo può compilare il campo attivo. La conferma resta necessaria; l’hardening non ha corretto questo difetto.
+**UX-01 — correzione locale verificata il 22 ottobre 2026, ancora da pubblicare:** gli edit di messaggi estranei non compilano campi di wizard, editor o riconciliazione. Invia una nuova risposta per il campo richiesto e controlla l’anteprima prima di confermare. La release v1.0.0 pubblicata conserva il difetto documentato nell’audit.
 
 Gli endpoint Supabase remoti richiedono HTTPS e non possono contenere userinfo. HTTP è consentito solo per `localhost`, `127.0.0.1` o `[::1]` espliciti, con porta opzionale, per sviluppo locale.
 
@@ -131,7 +131,9 @@ Per provare il flusso, invia uno degli esempi, apri Modifica → Conto di origin
 
 ### Messaggi modificati su Telegram
 
-Il polling richiede `message`, `edited_message` e `callback_query`. Una fonte non salvata modificata aggiorna l'anteprima nel pannello, invalidando i vecchi pulsanti; se diventa invalida o un comando, la proposta collegata viene chiusa. Una fonte già contabilizzata viene riconosciuta tramite ricevuta B1 prima di creare l'anteprima, anche dopo riavvio: solo avviso di registrazione, nessuna modifica al movimento. Se la lettura della ricevuta fallisce, non viene creata una nuova anteprima. L'ordinamento delle fonti non salvate è protetto soltanto nel processo attivo.
+Il polling richiede `message`, `edited_message` e `callback_query`. La modifica della fonte di una proposta ancora attiva aggiorna l'anteprima nel pannello, invalidando i vecchi pulsanti; se diventa invalida o un comando, la proposta collegata viene chiusa. Una fonte già contabilizzata viene riconosciuta tramite ricevuta B1 prima di creare l'anteprima, anche dopo riavvio: solo avviso di registrazione, nessuna modifica al movimento. Se la lettura della ricevuta fallisce, non viene creata una nuova anteprima. L'ordinamento delle fonti non salvate è protetto soltanto nel processo attivo.
+
+Gli edit non sono risposte ai campi: non compilano importo, data o saldo dichiarato. Una fonte senza ricevuta e senza una proposta attiva associata viene ignorata, anche dopo riavvio o annullamento. Per riprendere la compilazione invia un nuovo messaggio. Dopo un tentativo di salvataggio, i valori della proposta restano congelati per il retry della stessa richiesta.
 
 L'offset segue `update_id`, non `message_id`: una modifica ha un nuovo aggiornamento pur riferendosi allo stesso messaggio. La gestione dell'offset rimane solo in memoria; i movimenti confermati sono persistiti in Supabase. Anche il webhook usa la stessa elaborazione; un eventuale webhook registrato con un filtro `allowed_updates` deve includere `edited_message` e `callback_query`. La sua configurazione non viene cambiata automaticamente.
 
