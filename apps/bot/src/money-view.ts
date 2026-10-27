@@ -1,4 +1,4 @@
-/** Display exact decimal strings without Number coercion or rounding. Financial writes are unchanged. */
+/** Formatta stringhe decimali esatte, senza conversione a Number né arrotondamenti. */
 export function historyCents(value: string): bigint {
   const match = /^(-?)(\d+)(?:\.(\d{1,2})0*)?$/.exec(value);
   if (!match) throw new Error('Importo non valido');

@@ -1,74 +1,134 @@
-# Architettura attuale
+# Architettura
 
-L’architettura descritta corrisponde al codice del branch `dev` e alle migrazioni versionate. La presenza dei file SQL non dimostra che siano applicati sul database remoto. Per l'operatività vedi [guida Telegram](bot-guide.md) e [Supabase](../supabase/README.md).
+FinanceTracker separa dominio, bot, frontend e database. Il codice locale richiede
+le migrazioni fino a 008; la presenza dei file non certifica lo schema remoto.
+Per avvio e uso vedi la [guida Telegram](bot-guide.md); per lo schema la
+[guida Supabase](../supabase/README.md).
 
-## Dominio deterministico
+## Componenti
 
-`packages/domain` separa tipi, conti/alias, categorie/etichette, importi, date, parser e classificazione lessicale. Non usa AI o un modello addestrato. Le regole riconoscono frasi complete, privilegiano evidenze specifiche e lasciano sconosciuti/conflittuali i campi da completare manualmente. La confidenza 0.98 è un punteggio convenzionale, non probabilità statistica.
+| Percorso | Responsabilità |
+| --- | --- |
+| `packages/domain` | Tipi, conti e alias, categorie, importi, date, parser e classificazione a regole |
+| `apps/bot` | Autorizzazione Telegram, conversazioni, viste, trasporto e repository Supabase |
+| `apps/web` | React/TypeScript/Vite con dati sintetici locali e accesso soltanto grafico |
+| `supabase` | Migrazioni, preflight e prove SQL isolate |
 
-Un movimento ha conto, tipo e categoria; un trasferimento ha origine e destinazione distinte, senza categoria. Il percorso esplicito `da <conto> a <conto>` precede le regole entrata/uscita. Non si inferiscono controparti; menzioni aggiuntive, anche alias fuori dal percorso, richiedono chiarimento. Contanti riconosce cash/liquidi; i nomi delle righe Supabase rimangono Revolut, Isybank e Contanti.
+Il dominio non usa AI o un modello addestrato. Le regole privilegiano espressioni
+specifiche e lasciano da completare i campi sconosciuti o conflittuali. Il valore
+0.98 è un punteggio convenzionale, non una probabilità. Un trasferimento ha origine
+e destinazione distinte e nessuna categoria; non si deducono controparti mancanti.
 
-Il parser rifiuta zero, segni anche Unicode attorno alla valuta, più importi, separatori delle migliaia e frazioni di centesimo: non recupera sottostringhe positive né arrotonda. Accetta massimo sette cifre intere e due decimali. Le date sono giorni di calendario in APP_TIMEZONE (default Europe/Rome), non timestamp UTC; date impossibili/ambigue non diventano oggi. La grammatica completa e le categorie sono nella guida.
+Gli importi sono positivi, con massimo sette cifre intere e due decimali negli
+input del bot. Segni, importi multipli, migliaia e frazioni di centesimo vengono
+rifiutati senza arrotondamenti. `transaction_date` è una data in `APP_TIMEZONE`;
+`created_at` e `updated_at` sono istanti UTC. Date impossibili o ambigue non diventano oggi.
+La riconciliazione e `/saldi` usano sempre `Europe/Rome`: con un altro fuso i giorni possono divergere.
 
-## Flusso Telegram e quattro milestone UX
+## Conversazioni e consegna
 
-`telegram.ts` autorizza una sola chat privata; `polling.ts`/`local.ts` gestiscono polling e offset in memoria. `apps/bot/api/telegram.ts` espone il webhook con secret, senza coordinamento multiistanza. Entrambi usano `flow-delivery.ts` e `ProposalFlow`.
+`telegram.ts` autorizza la chat privata. Polling e webhook condividono
+`flow-delivery.ts` e `ProposalFlow`; il percorso supportato è una sola istanza di
+polling. Il webhook richiede un secret e non coordina lo stato fra processi.
 
-1. **Menu comandi:** `commands.ts` registra start, menu, saldi, movimenti, riconcilia, help e cancel nella chat autorizzata; polling all'avvio, webhook al primo POST autenticato del processo.
-2. **Storico:** `history.ts` e repository leggono cinque transazioni per pagina, più lookahead, ordinando data/UUID decrescenti con cursore. Un trasferimento compare una volta. Le rettifiche non sono transazioni e restano escluse.
-3. **Wizard compatto:** `wizard-state.ts`, `wizard.ts` e viste gestiscono entrata/uscita o trasferimento, navigazione Indietro e campi validati. Il pannello viene aggiornato con editMessageText; un testo libero completo può sostituire il wizard.
-4. **Anteprime:** uno stato attivo per chat; revisione/sessione invalidano callback precedenti. Modifiche della fonte aggiornano l'anteprima; fonti già salvate vengono riconosciute leggendo la ricevuta B1 prima del parsing operativo. Lettura fallita: niente nuova anteprima. Pulizia pulsanti best effort, fallback a nuovo messaggio; ricevute e messaggi utente non vengono cancellati.
+`commands.ts` registra sette comandi. Il wizard e le modifiche aggiornano lo stesso
+pannello; se Telegram rifiuta l’edit, viene inviato un nuovo messaggio e i vecchi
+pulsanti rimangono invalidi. Non vengono cancellati messaggi utente o ricevute.
 
-`proposals.ts` conserva menu/wizard/proposal/reconciliation/history/balances/management con TTL di 30 minuti e timer di rimozione della memoria; la pulizia visiva avviene su attività. Nessun testo grezzo è conservato nello store. Riavvio perde bozze/pannelli/ordinamento delle fonti non salvate. `/help` normale conserva il flusso; una fonte attiva modificata in un comando lo invalida. La conferma produce un effetto di persistenza; solo il successo chiude la proposta. Esiti incerti congelano valori e chiave per il retry.
+`proposals.ts` conserva uno stato per chat per 30 minuti, senza rinnovo a ogni
+modifica. Bozze, pannelli, offset e ordine delle fonti non salvate sono in memoria;
+il riavvio li perde. Lo store non conserva il testo grezzo. Il timeout di una
+scrittura congela valori e chiave per il retry; chiudere il flusso non annulla il database.
 
-## Persistenza, proprietà e B1
+Prima di creare una proposta si legge la ricevuta della fonte: se è già salvata
+si mostra soltanto l’esito; se la lettura fallisce non si apre una nuova anteprima.
+Un edit senza ricevuta deve appartenere alla proposta attiva, con verifica ripetuta
+dopo la lettura asincrona e nel gestore sincrono. Non compila mai un campo come una
+nuova risposta. `/help` conserva il flusso, ma una fonte trasformata in comando lo invalida.
 
-`persistence.ts` definisce contratto, validazione/mapping ed errori; `supabase.ts` implementa transazioni, ricevute, storico e riconciliazione. Usa chiave pubblica, signInWithPassword, sessione in memoria e getUser per verificarne il proprietario. Fetch limitato a 15 secondi; niente service role. Configurazione richiesta anche per le letture di storico/ricevute, non solo al salvataggio. Endpoint remoti HTTPS senza userinfo; HTTP limitato alle autorità loopback esplicite localhost/127.0.0.1/[::1], con porta opzionale e controllo prima della normalizzazione WHATWG per rifiutare forme ambigue. Errori di configurazione sintetici.
+Le consultazioni dei saldi sono messaggi autonomi con data/ora Roma. Aggiorna ne
+crea uno nuovo. Ogni invio ha un tentativo e gli update già trattati sono ricordati
+entro 1024 ID nel processo: non è una garanzia di consegna unica dopo un riavvio.
 
-`save_transaction_once` risolve gli UUID dei conti attivi posseduti, verificando nomi univoci ed EUR, e inserisce movimento e ricevuta atomicamente. L'importo validato dal dominio passa alla RPC come stringa decimale esatta. Spesa: from_account_id; entrata: to_account_id; trasferimento: entrambi e categoria NULL. Nessuna operazione presso le banche.
+## Persistenza e proprietà
 
-`operation-key.ts` deriva UUIDv8 opachi da namespace/chat/message_id, non dal contenuto. Il guidato eredita la chiave dal comando iniziale. Retry e replay riusano la chiave; due messaggi identici distinti possono creare due movimenti. Unicità user_id/request_id, lock advisory e payload canonico in 006 impediscono duplicati o riuso con payload diverso. La ricevuta coerente viene restituita prima dei controlli su conti successivamente disattivati o giornate chiuse.
+`persistence.ts` definisce i contratti; `supabase.ts` usa chiave pubblica,
+`signInWithPassword`, sessione in memoria e `getUser`. Le richieste hanno timeout
+di 15 secondi. La configurazione serve anche alle letture di storico e ricevute.
+Endpoint remoti HTTPS senza userinfo; HTTP soltanto su loopback letterale verificato
+prima della normalizzazione dell’URL. Gli errori di configurazione non espongono valori.
 
-RLS e FK di proprietà isolano i dati. Le RPC di scrittura riservate sono SECURITY DEFINER con search_path vuoto, auth.uid e filtri espliciti; le letture sono SECURITY INVOKER. Ricevute immutabili e FK impediscono cancellazioni che riabiliterebbero una chiave. La garanzia presuppone un bot per proprietario e non copre inserimenti diretti o storico senza ricevute. Callback B1 dopo riavvio possono solo leggere una ricevuta, senza reinserire un payload perso.
+`sourceOperationKey` genera UUIDv8 opachi da namespace, chat e messaggio, senza
+conservarne il testo. Il guidato eredita la chiave del comando iniziale. Un nuovo
+messaggio resta una nuova operazione anche quando il contenuto è identico.
 
-## Saldi e riconciliazione
+`save_transaction_once` risolve conti attivi posseduti in EUR e salva movimento e
+ricevuta nella stessa transazione. La richiesta usa importi decimali testuali.
+Unicità proprietario/richiesta, lock advisory e payload canonico proteggono retry
+e conflitti. Una ricevuta coerente viene restituita prima dei controlli su conti
+poi disattivati o giornate poi chiuse. La protezione non copre inserimenti diretti
+o storico precedente a 006. Il namespace presuppone un bot per proprietario.
 
-004 aggiunge apertura/data nullable con presenza congiunta. Apertura = inizio giornata; intervallo inclusivo da opening_date a p_as_of. `get_account_balances` distingue not_configured/before_opening con saldo NULL da configured. Include conti inattivi e, dopo 005, rettifiche non annullate. Dopo 008 esclude transazioni annullate. Nessun saldo corrente duplicato:
+RLS e FK composite isolano i proprietari. Le RPC di scrittura sono
+`SECURITY DEFINER`, con `auth.uid()`, filtri espliciti e `search_path` vuoto;
+le letture sono `SECURITY INVOKER`. Ricevute e audit sono immutabili e non
+memorizzano messaggi Telegram grezzi.
+
+## Saldi e chiusure Contanti
+
+Il database calcola i saldi: non esiste un saldo corrente duplicato nel frontend.
 
 `apertura + entrate − uscite + trasferimenti ricevuti − inviati + rettifiche`
 
-Ogni conto usa la propria apertura: un trasferimento compensa il patrimonio solo quando entrambi i lati sono inclusi. Aperture bancarie negative consentite; apertura Contanti non negativa, ma saldo teorico può scendere sotto zero. Numeric SQL esatto; il bot usa stringhe/BigInt per saldi Contanti e formattazione dello storico.
+L’apertura è l’inizio della giornata; l’intervallo va da `opening_date` a `p_as_of`,
+estremi inclusi. Ogni conto ha la propria apertura: un trasferimento compensa il
+patrimonio solo quando entrambi i lati sono inclusi. Le banche possono avere
+apertura negativa; Contanti richiede apertura non negativa, ma il teorico può esserlo.
 
-005 introduce account_adjustments e `/riconcilia`: oggi/ieri a fine giornata Europe/Rome, saldo dichiarato non negativo (zero valido), anteprima del teorico/differenza, conferma o annullamento. Apertura mancante impedisce l'operazione. La RPC ricalcola sotto lock, rifiuta anteprime obsolete e registra delta senza entrate/uscite fittizie. Request_id idempotente, unicità della chiusura e lock condivisi proteggono gare con movimenti/trasferimenti; READ COMMITTED richiesto.
+`get_account_balances` include conti inattivi e rettifiche e scarta gli annullati.
+Distingue `not_configured`, `before_opening` e `configured`: un `NULL` non vale zero.
+Il bot legge `balance::text` e somma centesimi BigInt per tutti i conti. Aperture
+incomplete o un conto principale mancante impediscono un totale parziale fuorviante.
 
-Chiusura blocca INSERT/UPDATE/DELETE che coinvolgono Contanti fino a quella data e modifiche contabili del conto riconciliato. account_adjustments contiene voided_at, ma nessuna API/comando di annullamento delle rettifiche o riapertura. L’annullamento dei normali movimenti è invece disponibile con 008. Dopo timeout, annullare il flusso non annulla il database; la conversazione di riconciliazione non viene recuperata dopo riavvio.
+`/riconcilia` confronta teorico e contato per oggi/ieri a fine giornata Roma.
+La RPC ricalcola sotto lock, rifiuta anteprime obsolete e registra una rettifica,
+senza entrate o uscite fittizie. Anche una differenza zero chiude il giorno.
+La chiusura blocca scritture retroattive che coinvolgono Contanti. Non sono esposte
+riapertura o annullamento delle rettifiche; la conversazione non si recupera dopo riavvio.
 
-007 protegge INSERT e UPDATE diretti: importi positivi, finiti, massimo due decimali, date finite; nessun arrotondamento. I CHECK transazioni NOT VALID preservano lo storico senza certificarlo. EUR è vincolo di tutti i conti, anche inattivi: impedisce trasferimenti FX e modifiche incoerenti; non converte dati. Preflight obbligatorio, nessuna riparazione automatica.
+## Correzioni e storico
 
-## Limiti e sviluppi futuri
+La migrazione 008 aggiunge `ledger_version`, `voided_at`, `voided_by` e
+`transaction_changes`. Il saldo dipende dalla riga corrente; gli snapshot prima/dopo
+sono audit, non un secondo ledger. L’annullamento conserva la riga ma la esclude
+anche dai saldi storici. Non esistono cancellazione fisica, riattivazione o cambio tipo.
 
-Dashboard in `apps/web` non implementata: leggerà Supabase autenticato; niente dataset demo parallelo. Stack web e realtime sono ipotesi, non contratti attuali. created_at/updated_at sono istanti UTC e non compaiono nel bot; una futura UI dovrà formattarli esplicitamente nel fuso desiderato. transaction_date resta una data.
+`manage_transaction_once` verifica proprietario, chiave, payload, conti e versione;
+salva audit e modifica atomicamente. I lock seguono richiesta → conti Contanti
+ordinati → movimento. Anche le correzioni bancarie acquisiscono i lock Contanti
+per mantenere l’ordine comune con le chiusure. Serve `READ COMMITTED`.
+I trigger controllano vecchi e nuovi riferimenti anche nell’annullamento.
 
-APP_TIMEZONE diverso da Europe/Rome può divergere dalla riconciliazione: uniformare questo contratto in un intervento dedicato. Mancano gestione aperture via bot, riaperture/cambio tipo e storico rettifiche. Stato UX multiistanza, snapshot dello storico e indici per ledger grandi richiedono valutazione separata.
+`authenticated` non può fare UPDATE/DELETE diretti sulle transazioni. I trigger
+richiedono stato iniziale valido e incremento di versione con audit coerente.
+Le ricevute di creazione restano valide dopo le correzioni. Dopo riavvio un vecchio
+pulsante può soltanto leggere una ricevuta, senza ricostruire o reinviare una scrittura.
 
-Vitest usa servizi simulati; runner SQL separati applicano migrazioni in database sintetici isolati con RLS/trigger/vincoli attivi. PostgreSQL nativo verifica lock e concorrenza; Auth locale minimo non certifica Auth/JWT, catalogo o rete Supabase remoti.
+Lo storico legge cinque transazioni più lookahead con cursore data/UUID decrescente,
+importo testuale e filtro proprietario. Non include rettifiche e non è uno snapshot
+congelato: dopo una modifica della data va riaperto. Non ci sono indici specifici
+per grandi ledger; prima di aggiungerli occorre misurare le query.
 
-## Milestone B/C: saldi e correzioni controllate
+## Frontend e verifiche
 
-`balances.ts` usa get_account_balances con proiezione PostgREST balance::text; lo SDK non decodifica numeric in Number. Somma in BigInt tutti i conti restituiti, anche inattivi o aggiuntivi. Not_configured/before_opening/mancanza dei conti principali rendono il totale non disponibile, senza NULL→zero. Default e Aggiorna usano Europe/Rome. Sessione/revisione e loading impediscono callback obsolete; un risultato di lettura sostituito viene ignorato. Le rilevazioni `/saldi` sono messaggi autonomi con data/ora: anche Aggiorna ne crea una nuova. Restano fuori dalla mappa dei pannelli modificabili e dalla pulizia generica. Invio a tentativo singolo e memoria limitata degli update `/saldi` evitano reinvii automatici; non costituiscono una garanzia di consegna exactly-once dopo riavvio.
+La dashboard usa solo aggregati statici in `apps/web/src/data/demo.ts` e tipi del
+dominio. Non legge Supabase, non crea sessioni e non calcola saldi. I trasferimenti
+sono esclusi dai totali di entrate/uscite. I percorsi `/` e `/accesso` sono indipendenti.
+I dati temporanei andranno sostituiti con la futura integrazione, senza un ledger parallelo.
 
-`management.ts` riusa storico, dominio e formattazione. Selezione indicizzata nella pagina in memoria con etichette descrittive e numeri corrispondenti nel testo, dettaglio riletto dal database, editor a tipo fisso, prima/dopo automatico dopo un campo valido e conferma esplicita. Lo stato di successo offre il ritorno allo storico riletto, senza consentire nuove scritture dalla vecchia conferma. Importi originali rimangono stringhe esatte; i nuovi input riusano parseAmountInput (massimo sette cifre intere) e parseDateInput. Nessuna conversione Number degli importi storici. Gli UUID dei conti sono quelli della lettura autenticata, ricontrollati in SQL.
-
-008 aggiunge transactions.ledger_version, voided_at/voided_by e transaction_changes. La riga corrente è l'unica fonte per i saldi; gli snapshot prima/dopo sono un audit append-only, non un secondo ledger. Ogni richiesta edit/void ha UUID stabile, payload canonico e ricevuta persistente nello stesso audit. Non esiste DELETE fisico né riattivazione. L'annullamento esclude il movimento per tutte le date di lettura: è una rettifica dello storico, non una scrittura compensativa alla data odierna. I movimenti modificati cambiano posizione nello storico se cambia la data; riaprire /movimenti dopo la conferma.
-
-manage_transaction_once autentica auth.uid, serializza per proprietario/chiave, recupera ricevute prima dei controlli correnti, poi acquisisce i lock Contanti ordinati prima del lock del movimento. Ricontrolla versione, stato, conti posseduti attivi EUR e dati finanziari, aggiunge audit e applica UPDATE atomico. Il trigger 005 controlla ancora OLD/NEW, incluso void: nessuna riapertura implicita. Reconcile_cash non prende lock sulle righe transazione, quindi questo ordine evita il ciclo conto/movimento. Le operazioni sullo stesso Contanti vengono serializzate anche per correzioni bancarie: compromesso prudente per tre conti personali.
-
-UPDATE/DELETE diretti sono revocati ad authenticated; un nuovo trigger richiede versione incrementale e snapshot di audit coerenti per UPDATE, stato iniziale valido per INSERT e vieta DELETE. RLS sul registro consente solo letture proprie; scritture riservate alla RPC SECURITY DEFINER con search_path vuoto e owner esplicito. Le ricevute 006 non vengono modificate: un replay originario recupera lo stesso ID anche dopo correzione/annullamento. Chiavi delle correzioni e B1 hanno registri e namespace di lock separati.
-
-Dopo timeout l'editor congela chiave/payload; stesso pulsante ritenta. Dopo riavvio il pulsante con chiave può solo leggere get_transaction_change_receipt: niente ricostruzione della scrittura. La bozza non è persistente. Dettagli in [guida B/C](milestones-b-c.md).
-
-## Verifica pre-release e manutenzione
-
-La CI include automaticamente test applicativi, audit npm completo/produttivo e SQL/concorrenza sui push dev/main e PR verso questi branch, oltre all’avvio manuale. Due check indipendenti: `test` e `SQL integration`, su Ubuntu 24.04 e Node applicativo 22. La [guida CI](ci.md) distingue la qualificazione precedente dalla nuova configurazione ancora da eseguire su GitHub. Gli snapshot del runner PGlite confrontano valori SQL testuali e ordine esplicito, preservando anche le date infinite legacy su Node 22 e 24.
-
-UX-01 è corretto e verificato localmente il 22 ottobre 2026, con modifica ancora da pubblicare. La delivery verifica prima la ricevuta B1; senza ricevuta, accetta un edit solo per la fonte della proposta attiva, identificata dalla chiave dell’operazione, anche per le proposte guidate. Il gestore sincrono ripete il controllo prima di comandi e input. Gli edit estranei non cambiano campi, pannelli o ordinamento; dopo riavvio una fonte senza ricevuta né proposta associata viene ignorata. Importo, data e saldo dichiarato si compilano con nuovi messaggi. Il difetto accettato nella v1 pubblicata resta documentato nell’audit. Revisione mirata, raccomandazioni strutturali e limiti della verifica in [hardening pre-release](hardening-2026-10-19.md).
+I test applicativi simulano i servizi. Le prove SQL locali mantengono RLS, trigger
+e vincoli attivi; non certificano Auth, PostgREST o schema remoti. Dopo le
+correzioni non è sicuro ripristinare il vecchio codice dei saldi. La
+[guida Supabase](../supabase/README.md#backup-e-ripristino) descrive i controlli di recupero;
+non è documentata una prova completata di restore. Per CI e limiti delle evidenze
+vedi [controlli locali](ci.md).

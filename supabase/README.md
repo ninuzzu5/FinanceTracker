@@ -15,7 +15,7 @@ Nessuna migrazione è applicata automaticamente dal bot.
 | [004](migrations/004_account_openings_and_balances.sql) | Apertura/data nullable congiunte e get_account_balances | Schema/FK/categorie/RLS coerenti con 001/002; 003 non è prerequisito numerico |
 | [005](migrations/005_cash_reconciliation.sql) | account_adjustments, RPC e lock/trigger di chiusura Contanti; integra rettifiche nei saldi | Dopo 004, verificando firma RPC e vincoli di apertura |
 | [006](migrations/006_transaction_idempotency.sql) | transaction_receipts, save_transaction_once e get_transaction_receipt | Dopo 005, con RLS attiva e oggetti 006 assenti |
-| [007](migrations/007_monetary_integrity_and_eur.sql) | CHECK importi/date, EUR per tutti i conti, controllo EUR nella RPC B1 | Dopo 006 e [preflight READ ONLY](preflight/007_monetary_integrity_and_eur.sql) |
+| [007](migrations/007_monetary_integrity_and_eur.sql) | CHECK importi/date, EUR per tutti i conti, controllo EUR nella RPC di salvataggio | Dopo 006 e [preflight READ ONLY](preflight/007_monetary_integrity_and_eur.sql) |
 | [008](migrations/008_transaction_management.sql) | Versioni, annullamento logico, audit e RPC storiche; saldi senza movimenti annullati | Dopo 007 e [preflight READ ONLY](preflight/008_transaction_management.sql); revoca UPDATE/DELETE diretti |
 
 **Database nuovo:** 001 → 002 → 004 → 005 → 006 → 007 → 008. La baseline 001
@@ -46,7 +46,7 @@ Se oggetti o policy differiscono, fermarsi e confrontarli senza DROP correttivi.
 - 006: ricevute con RLS/sola lettura e immutabilità, FK protetto; RPC con
   privilegi previsti. Stessa chiave/payload = stesso UUID; payload diverso = PT409.
 - 007: tre nuovi CHECK, EUR validato, quelli transazioni inizialmente NOT VALID;
-  nuove scritture/UPDATE invalidi rifiutati. Verificare anche la RPC B1 sostituita.
+  nuove scritture/UPDATE invalidi rifiutati. Verificare anche la RPC di salvataggio sostituita.
 - 008: versione/stato annullamento, RLS e immutabilità di transaction_changes, RPC storiche, UPDATE/DELETE revocati; annullamenti esclusi dai saldi e blocchi Contanti ancora attivi.
 
 Controllare oggetti tramite pg_constraint, pg_policies, pg_class.relrowsecurity,
@@ -150,13 +150,13 @@ L'UUID viene risolto a ogni salvataggio: non va aggiunto alla configurazione del
 RLS e vincoli di proprietà restano applicati.
 
 Questa operazione crea soltanto un conto: non inserire transazioni iniziali o
-saldi inventati. Per configurare un'apertura verificata, segui la sezione Milestone 1. Il bot non crea automaticamente la riga remota.
+saldi inventati. Per configurare un'apertura verificata, segui la sezione Apertura e saldo teorico. Il bot non crea automaticamente la riga remota.
 
 Per i vincoli dei campi consulta la [baseline locale](migrations/001_initial_schema.sql)
 e le migrazioni incrementali indicate sopra.
 
 
-## Milestone 1: apertura e saldo teorico
+## Apertura e saldo teorico
 
 La migrazione incrementale è `migrations/004_account_openings_and_balances.sql`.
 Aggiunge a `accounts` `opening_balance numeric` e `opening_date date`, entrambi
@@ -308,7 +308,7 @@ Sono coperti anche precisione, aperture negative/rifiutate, date diverse, conti
 inattivi, modifiche retroattive, RLS tra due utenti, accesso anonimo e JWT assente.
 La verifica locale non certifica il catalogo o l'infrastruttura Auth remoti.
 
-## Milestone 2: riconciliazione Contanti
+## Riconciliazione Contanti
 
 La migrazione `migrations/005_cash_reconciliation.sql` va applicata **dopo 004**.
 La presenza dei file locali non attesta l’applicazione sul progetto remoto.
@@ -386,7 +386,7 @@ e cancellazioni fino a quella data, su entrambe le direzioni dei trasferimenti e
 sui riferimenti vecchi/nuovi. Blocca anche modifiche all'apertura, nome, tipo,
 proprietario o valuta del conto riconciliato. Movimenti bancari senza Contanti e
 movimenti Contanti di giornate successive restano disponibili. Cambiare `is_active`
-resta possibile. La riapertura verrà gestita in una milestone distinta.
+resta possibile. La riapertura verrà gestita in un intervento separato.
 
 I trigger e la RPC condividono il lock del conto. La chiave univoca per utente
 rende idempotente il ritentativo con stesso payload; una chiave riutilizzata con
@@ -398,7 +398,7 @@ sono rifiutati per evitare controlli su chiusure non aggiornate.
 Il flusso Telegram usa lo store esistente in memoria, con scadenza di 30 minuti:
 un riavvio perde la conversazione. Il database conserva l'idempotenza e la chiusura,
 ma non esiste recupero Telegram della ricevuta **di riconciliazione** dopo riavvio;
-questo limite non riguarda i pulsanti dei movimenti B1. Le richieste
+questo limite non riguarda i pulsanti dei movimenti con ricevuta persistente. Le richieste
 HTTP hanno timeout di 15 secondi; un timeout non garantisce rollback sul server.
 Il pulsante di ritentativo mantiene richiesta e chiave; Annulla non cancella scritture
 incerte. La duplicazione rimane impedita dal database anche dopo un riavvio.
@@ -435,7 +435,7 @@ Dopo conferma controlla che sia comparsa **una riga account_adjustments** e ness
 nuova riga transactions, e leggi get_account_balances con la sessione autenticata
 reale dell'utente di test. Non simulare claim nel progetto personale.
 
-## B1: ricevute persistenti dei movimenti — migrazione 006
+## Ricevute persistenti dei movimenti — migrazione 006
 
 `migrations/006_transaction_idempotency.sql` richiede 005. Crea soltanto
 `transaction_receipts`, policy/trigger di protezione e due RPC. Non modifica,
@@ -517,7 +517,7 @@ originale e data di creazione. RLS autorizza solo la lettura del proprietario;
 INSERT/UPDATE/DELETE diretti sono revocati ad authenticated. Le ricevute sono
 immutabili, e il FK impedisce di cancellare una transazione referenziata: la chiave
 non può diventare riutilizzabile per ricreare un movimento. Con 008 tutti i movimenti usano annullamento logico e il DELETE fisico è vietato;
-le ricevute B1 restano immutabili anche dopo una correzione o un annullamento. Il payload è quello
+le ricevute di creazione restano immutabili anche dopo una correzione o un annullamento. Il payload è quello
 dell'operazione originaria, non un saldo memorizzato o un motore di aggiornamento
 retroattivo dei movimenti.
 
@@ -548,14 +548,14 @@ Fuori copertura:
   che non contengono la chiave. Non modificare/reinviare vecchie fonti per correggere
   lo storico: per correggere usa il dettaglio dello storico con 008, che protegge le chiusure Contanti. `/movimenti` legge lo storico ma non collega vecchie fonti a ricevute mancanti.
 - Inserimenti diretti SQL/REST su transactions che non passano dalla nuova RPC;
-  restano disponibili secondo le policy preesistenti. B2/B3 proteggono comunque importi, date e valute anche fuori RPC.
+  restano disponibili secondo le policy preesistenti. I vincoli monetari e di valuta restano attivi anche fuori RPC.
 - Un messaggio nuovo, copia/incolla o inoltro con message_id diverso è una nuova
   operazione: non è possibile distinguerlo automaticamente da una seconda spesa
   legittima identica. In caso di esito incerto usa il vecchio pulsante, non una copia.
 - Una compilazione guidata non ancora salvata persa al riavvio non è ricostruibile
   dal solo pulsante. Il pulsante può recuperare eventuale ricevuta, non salvare un
   payload mancante. Riprendere automaticamente bozze richiederebbe persistenza
-  della conversazione, esclusa da B1.
+  della conversazione, esclusa dal recupero tramite ricevute dei movimenti.
 - Modifiche manuali di record fuori RPC, rimozione amministrativa delle protezioni,
   cambio del namespace o altri bot con lo stesso proprietario non fanno parte
   della garanzia di retry dell'attuale bot.
@@ -580,7 +580,7 @@ al PostgreSQL locale tramite un SDK sintetico: perdita della risposta post-commi
 doppia conferma, reset dello stato di processo, replay e modifica della fonte.
 Nessuna connessione remota e nessun uso di credenziali reali.
 
-## B2/B3 — Migrazione 007: integrità monetaria e solo EUR
+## Migrazione 007: integrità monetaria e solo EUR
 
 `migrations/007_monetary_integrity_and_eur.sql` richiede 006 e non modifica le
 migrazioni precedenti. Non aggiorna transazioni, saldi iniziali, timestamp o dati
@@ -600,10 +600,10 @@ concorrenza. Non serve un trigger che confronti due conti con possibili race.
 Un futuro supporto multi-valuta richiederà un modello FX esplicito e una nuova
 migrazione, non la rimozione occasionale del controllo.
 
-La risoluzione UUID resta nella RPC B1: 007 sostituisce soltanto
+La risoluzione UUID resta nella RPC di salvataggio: 007 sostituisce soltanto
 `save_transaction_once`, aggiungendo il controllo EUR sui conti risolti (PT422,
-tradotto dal bot in un messaggio italiano). Il controllo è dopo il recupero di
-ricevuta B1, così i replay già riusciti mantengono la loro semantica. La funzione
+tradotto dal bot in un messaggio italiano). Il controllo avviene dopo il recupero della
+ricevuta di creazione, così i replay già riusciti mantengono la loro semantica. La funzione
 mantiene autenticazione, owner filter, search_path vuoto, lock, payload canonico,
 privilegi e atomicità. Anche `mapTransaction` richiede `currency='EUR'`.
 
@@ -671,20 +671,21 @@ salto primaverile, ora ripetuta autunnale e percorso Telegram→RPC.
 Criticità indipendente confermata dal codice: riconciliazione e relativa UI usano
 Europe/Rome fisso, mentre i movimenti consentono APP_TIMEZONE diverso. La
 configurazione predefinita è coerente; un altro fuso può produrre giornate diverse
-vicino a mezzanotte. La divergenza non è stata modificata da questo intervento. B4/B5 sono corretti nel parser; la UX attuale verifica preventivamente le
-ricevute B1 e invalida le fonti modificate. La divergenza di fuso resta aperta.
+vicino a mezzanotte. Il parser rifiuta gli importi con segni e richiede chiarimenti sui conti ambigui.
+Prima di aprire una proposta il bot verifica le ricevute di creazione e invalida
+i pulsanti delle fonti modificate. La divergenza di fuso resta aperta.
 
 ### Test locali
 
-I comandi di verifica rimangono quelli della sezione B1. Il runner in memoria
+I comandi di verifica sono nella sezione sulle ricevute persistenti. Il runner in memoria
 prova prima le difese precedenti, poi 007, preflight su storico sintetico invalido,
 fallimento atomico per un conto USD e conservazione integrale delle righe.
-Dopo 007 riesegue saldi, riconciliazione e B1, oltre alla nuova fixture
+Dopo 007 riesegue saldi, riconciliazione e i salvataggi con ricevuta, oltre alla nuova fixture
 `tests/monetary_integrity_and_eur.sql`: INSERT/UPDATE, date infinite, importi
 invalidi, EUR, modifiche conti, trasferimenti, RLS e timestamp. Non disabilita
 alcuna protezione.
 
-Lo stress nativo esegue le gare Contanti e B1 sullo schema 007, poi 25 sessioni con
+Lo stress nativo esegue le gare Contanti e i salvataggi con ricevuta sullo schema 007, poi 25 sessioni con
 212 scritture invalide rifiutate e 13 trasferimenti concorrenti a centesimi,
 verificando patrimonio invariato. I runtime temporanei non sono dipendenze del
 progetto; socket locale, credenziali sintetiche e cluster eliminato alla fine.
@@ -698,21 +699,98 @@ Non legge account_adjustments. La gestione controllata dei movimenti richiede
 uguali, trasferimento singolo e isolamento tra due proprietari. Nessun indice nuovo
 è introdotto: grandi ledger richiederanno una valutazione prestazionale separata.
 
-Il [report del 9 ottobre](../docs/audit-2026-10-09.md) è storico: i difetti B1–B5
-sono ora coperti da correzioni e test di regressione nel codice attuale. Il runner
-SQL conserva caratterizzazioni B2/B3 **prima di 007**, poi verifica le protezioni
-dopo 007; quelle caratterizzazioni non indicano che il difetto sia ancora presente
-con tutte le migrazioni applicate. La copertura locale non attesta l'allineamento
-remoto, Auth/JWT reale, rete reale o un deployment multiistanza.
+I test conservano casi monetari e di valuta non validi sullo schema precedente
+alla migrazione 007, poi verificano il rifiuto dopo la sua applicazione. Questi
+casi storici non descrivono il comportamento dello schema aggiornato. Le prove
+locali non attestano schema remoto, Auth/JWT, rete reale o uso multiistanza.
 
 ## Migrazione 008 — saldi Telegram e gestione dei movimenti
 
-Prerequisiti, procedura completa, rollback, RPC e collaudo: [Milestone B/C](../docs/milestones-b-c.md). Eseguire [preflight 008](preflight/008_transaction_management.sql) in READ ONLY prima del file [008_transaction_management.sql](migrations/008_transaction_management.sql), dopo 007. Non rieseguire baseline o migrazioni già applicate.
+La procedura completa e le precauzioni di ripristino sono riportate qui sotto. Per il collaudo del bot vedi la [guida Telegram](../docs/bot-guide.md#collaudo-di-saldi-e-correzioni). Eseguire [preflight 008](preflight/008_transaction_management.sql) in READ ONLY prima del file [008_transaction_management.sql](migrations/008_transaction_management.sql), dopo 007. Non rieseguire baseline o migrazioni già applicate.
 
-Aggiunge ledger_version (default 1), voided_at/voided_by a transactions e transaction_changes con RLS di sola lettura propria. Il registro mantiene richiesta/payload, autore-proprietario, transaction_id, timestamp e snapshot prima/dopo; non aggiorna le ricevute B1 né i valori finanziari storici all'installazione. Il primo snapshot di correzione conserva lo stato originale. Nessun saldo corrente duplicato.
+Aggiunge ledger_version (default 1), voided_at/voided_by a transactions e transaction_changes con RLS di sola lettura propria. Il registro mantiene richiesta/payload, autore-proprietario, transaction_id, timestamp e snapshot prima/dopo; non aggiorna le ricevute di creazione né i valori finanziari storici all'installazione. Il primo snapshot di correzione conserva lo stato originale. Nessun saldo corrente duplicato.
 
 get_transaction_for_management(uuid) restituisce JSON con importo/versione testuali e conti propri; get_transaction_change_receipt(uuid) legge soltanto la ricevuta di correzione. manage_transaction_once(uuid,uuid,integer,text,numeric,date,text,uuid,uuid) modifica a tipo fisso o annulla, con owner/versione/payload/lock e trigger esistenti. La RPC dei saldi mantiene firma e stati, includendo rettifiche e filtrando voided_at IS NULL. `/saldi` proietta balance::text via PostgREST e somma centesimi BigInt, anche per conti inattivi.
 
-**Cambiamento di autorizzazioni intenzionale:** authenticated perde UPDATE/DELETE diretti su transactions. Le modifiche contabili passano dalla RPC; INSERT resta compatibile con B1 e le policy proprie, senza una nuova garanzia di idempotenza sugli inserimenti diretti. Gli annullamenti preservano riga e ricevuta, senza movimenti compensativi fittizi. I trigger 005 non vengono disabilitati o sostituiti. Vecchie fixture UPDATE/DELETE vengono eseguite prima di 008; la nuova fixture verifica i percorsi RPC e il rifiuto dei percorsi diretti dopo 008.
+**Cambiamento di autorizzazioni intenzionale:** authenticated perde UPDATE/DELETE diretti su transactions. Le modifiche contabili passano dalla RPC; INSERT resta compatibile con il salvataggio tramite ricevuta e le policy proprie, senza una nuova garanzia di idempotenza sugli inserimenti diretti. Gli annullamenti preservano riga e ricevuta, senza movimenti compensativi fittizi. I trigger 005 non vengono disabilitati o sostituiti. Vecchie fixture UPDATE/DELETE vengono eseguite prima di 008; la nuova fixture verifica i percorsi RPC e il rifiuto dei percorsi diretti dopo 008.
 
 I runner eseguono anche transaction_management.sql; quello nativo aggiunge management-concurrency.mjs dopo aver rilasciato le connessioni delle suite precedenti. Include 25 retry simultanei, aggiornamenti incompatibili, lock con chiusura, rollback e repository/bot reali con SDK ponte su SQL locale. Il runtime richiede memoria condivisa e socket locali. Non serve accesso a Supabase remoto, non vengono letti file env e nessuna dipendenza entra nel progetto.
+
+### Contratti della migrazione 008
+
+File: [008_transaction_management.sql](migrations/008_transaction_management.sql).
+
+| Oggetto | Contratto |
+| --- | --- |
+| `transactions.ledger_version` | Integer positivo, inizialmente 1; incremento per correzione |
+| `transactions.voided_at`, `voided_by` | Annullamento con istante e autore, presenti insieme |
+| `transaction_changes` | Owner/autore, request_id, transaction_id, action, payload, snapshot prima/dopo e created_at; unicità richiesta/utente e versione/movimento |
+| `get_transaction_for_management(uuid)` | SECURITY INVOKER, snapshot JSON di un movimento proprio e conti propri, importo/versione come testo |
+| `manage_transaction_once(uuid,uuid,integer,text,numeric,date,text,uuid,uuid)` | SECURITY DEFINER con owner esplicito: chiave, movimento, versione attesa, action edit/void, nuovi campi finanziari; restituisce transaction_id/action/version |
+| `get_transaction_change_receipt(uuid)` | SECURITY INVOKER, lettura propria di una ricevuta o NULL, nessuna scrittura |
+| `get_account_balances(date)` | Firma/stati invariati, rettifiche incluse e transazioni voided escluse |
+| `guard_managed_transactions()` | Stato iniziale valido, UPDATE con versione/audit coerenti, nessun DELETE |
+| `transaction_snapshot(transactions)` | Helper puro, campi contabili espliciti senza testo Telegram |
+
+Per `void`, tutti i nuovi campi finanziari devono essere NULL. Per `edit` sono richiesti tutti i campi pertinenti, senza modifica parziale. Conti attivi posseduti in EUR, vincoli 007 e categorie del tipo sono ricontrollati dal database. Il proprietario autenticato coincide con l'autore; non è accettato user_id dal client.
+
+UPDATE/DELETE diretti su transactions sono revocati ad authenticated. INSERT resta conforme alle policy precedenti; solo il percorso di salvataggio con ricevuta offre idempotenza dei nuovi movimenti. Il registro è leggibile solo dal proprietario e non modificabile direttamente. Nessuna modifica delle migrazioni 001–007 o delle ricevute di creazione.
+
+I lock sono: advisory richiesta → conti Contanti propri ordinati per UUID → riga transazione. Le correzioni bancarie acquisiscono anch'esse i lock Contanti per mantenere un unico ordine prudente. Il trigger 005 resta invariato e verifica OLD/NEW anche per l'annullamento; riconciliazione e correzione non possono superarsi senza ricalcolo/conflitto. Serve READ COMMITTED.
+
+### Applicazione manuale della migrazione 008
+
+Procedura per ambienti non ancora allineati: **non rieseguire 008 nel progetto già migrato**.
+
+1. **Prima su un progetto di test separato.** Predisporre utente e conti sintetici. Per le aperture usare un dataset di test documentato, oppure una consistenza verificata per quell'ambiente; non copiare importi di esempio nei conti personali.
+2. Fermare il bot e altre scritture durante la finestra DDL. Nel progetto corretto, SQL Editor con amministratore fidato, eseguire l'intero [preflight 008](preflight/008_transaction_management.sql). È `BEGIN READ ONLY` e restituisce metadati/conteggi.
+3. Confrontare lo schema con 001/002/004/005/006/007: RLS sulle quattro tabelle contabili, tre vincoli 007, RPC di salvataggio e riconciliazione, trigger Contanti abilitati, FK di proprietà. Gli oggetti/colonne 008 devono essere assenti. Dati monetari/date incompatibili o conti non EUR richiedono revisione esplicita: niente arrotondamenti, conversioni o cancellazioni automatiche. Il preflight non certifica policy personalizzate né l'intero catalogo.
+4. Database nuovo: **001 → 002 → 004 → 005 → 006 → 007 → 008**. La 003 è solo legacy. Su database esistente applicare solo i passaggi mancanti verificati; non rieseguire baseline o 004–008 già applicate.
+5. Incollare **l'intero file 008**, BEGIN/COMMIT inclusi, una volta. Non modificare trigger o policy per farlo passare. In caso di errore eseguire ROLLBACK nella sessione, confrontare lo schema e correggere il piano; non aggiungere DROP improvvisati. La migrazione aggiunge metadati e vincoli ma non riscrive i valori finanziari o gli snapshot delle ricevute di creazione.
+6. Controllare gli oggetti e i permessi con query di sola lettura, per esempio:
+
+   ```sql
+   select relname, relrowsecurity from pg_class
+   where oid in ('public.transactions'::regclass, 'public.transaction_changes'::regclass);
+   select has_table_privilege('authenticated','public.transactions','UPDATE') as direct_update,
+          has_table_privilege('authenticated','public.transactions','DELETE') as direct_delete,
+          has_table_privilege('authenticated','public.transaction_changes','INSERT') as direct_audit_insert;
+   select tgname, tgenabled from pg_trigger
+   where tgrelid in ('public.transactions'::regclass,'public.transaction_changes'::regclass)
+     and not tgisinternal;
+   select proname, prosecdef, proconfig from pg_proc
+   where pronamespace='public'::regnamespace
+     and proname in ('manage_transaction_once','get_transaction_for_management',
+                    'get_transaction_change_receipt','get_account_balances');
+   ```
+
+   RLS deve essere attiva, i tre permessi diretti false, trigger attivi, search_path vuoto per le RPC. Verificare anche grant EXECUTE: authenticated consentito, anon/PUBLIC esclusi. SECURITY DEFINER solo per la RPC di scrittura.
+7. Se necessario aggiornare la cache: `NOTIFY pgrst, 'reload schema';`. Compilare/riavviare il bot con `npm run bot:dev`, in una sola istanza; il menu nativo registra sette comandi. Nessuna nuova variabile env.
+8. Verificare tramite sessioni realmente autenticate degli utenti di test. SQL Editor amministrativo senza JWT non rappresenta il client; non simulare claim nei progetti personali. I claim artificiali dei runner sono esclusivamente locali.
+
+### Se una migrazione fallisce
+
+Un errore prima del COMMIT annulla l'intera migrazione, compresi i grant. Dopo COMMIT, non esiste un downgrade automatico sicuro: **non distribuire il vecchio codice dei saldi** o la RPC precedente, perché riconterebbero le transazioni annullate. In un ambiente usa e getta si può ricreare il database; su un database da preservare serve una migrazione correttiva in avanti o un ripristino da backup pianificato, conservando audit, annullamenti e ricevute. Verifica concretamente il ripristino su una copia isolata prima di affidarti a un backup.
+
+## Backup e ripristino
+
+Non è documentata una prova completata di ripristino dello schema 008. Le
+impostazioni del servizio, la retention e il ripristino di Auth non sono stati
+verificati. Non assumere che una CI verde dimostri la recuperabilità dei dati.
+
+Prima di scegliere i comandi di backup o restore, verifica ciò che il provider
+rende disponibile per il progetto e il piano in uso. Questa guida non inventa
+una procedura specifica né considera collaudato un backup non ripristinato.
+
+1. Registra disponibilità, frequenza, retention e punto recuperabile del backup, perdita massima accettabile e tempo di ripartenza. Verifica separatamente cosa viene conservato di Auth e dei proprietari.
+2. Prova il ripristino in un progetto isolato, mai sopra i dati personali come esperimento. Proteggi il backup come i dati originali: niente file o credenziali nel repository.
+3. Confronta migrazioni e catalogo fino a 008: RLS, grant effettivi, FK di proprietà, trigger Contanti, vincoli monetari/date/EUR, RPC e registro delle correzioni. I preflight non certificano policy personalizzate o tutti i grant ereditati.
+4. Con utenti Auth reali di test verifica che un proprietario non possa leggere o modificare righe, ricevute e correzioni di un altro, e che l’accesso anonimo non permetta operazioni protette. Non usare l’SQL Editor amministrativo come prova di RLS.
+5. Verifica almeno un movimento modificato, uno annullato, una ricevuta di creazione, una di correzione e una chiusura Contanti. Saldi e retry devono corrispondere al punto del backup; controlla anche gli importi testuali via PostgREST.
+6. Prima di riavviare il bot riconcilia le operazioni successive al punto recuperato. Una scrittura o ricevuta persa può rendere pericoloso reinviare vecchi messaggi: non applicarli automaticamente.
+7. Registra esito, durata, punto ripristinato e passi di ripartenza. Avvia una sola istanza con codice compatibile con schema e annullamenti recuperati.
+
+Dopo il COMMIT della migrazione 008, tornare al vecchio codice dei saldi può
+ricontabilizzare i movimenti annullati. Per un database da preservare serve una
+correzione in avanti revisionata o un ripristino pianificato che mantenga audit,
+annullamenti e ricevute. Non disabilitare le protezioni per rendere possibile il downgrade.

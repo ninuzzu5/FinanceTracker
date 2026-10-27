@@ -10,7 +10,9 @@
   ],
   "scripts": {
     "bot:dev": "npm run build && node apps/bot/dist/src/local.js",
-    "build": "npm run build -w @finance-tracker/domain && npm run build -w @finance-tracker/bot",
+    "build": "npm run build -w @finance-tracker/domain && npm run build -w @finance-tracker/bot && npm run build -w @finance-tracker/web",
+    "web:dev": "npm run build -w @finance-tracker/domain && npm run dev -w @finance-tracker/web",
+    "web:build": "npm run build -w @finance-tracker/domain && npm run build -w @finance-tracker/web",
     "test": "npm run test --workspaces --if-present",
     "typecheck": "npm run build -w @finance-tracker/domain && npm run typecheck --workspaces --if-present"
   },

@@ -42,7 +42,7 @@ export async function deliverUpdate(
   if (!flow.isSaving(chatId) && authorized && isRecord(message) && typeof message.text === 'string' && !fieldReply && (decision.kind === 'preview' || isRecord(update) && 'edited_message' in update || ['start','menu'].includes(commandName(message.text) ?? ''))) {
     const sourceId = message.message_id as number;
     const requestId = sourceOperationKey(chatId,sourceId);
-    // B1 receipts are the sole persistent authority. Fail closed if they cannot be checked.
+    // Le ricevute sono la fonte persistente: se la verifica fallisce, non creare anteprime.
     let receipt;
     try { receipt = await repository.getTransactionReceipt(requestId); }
     catch {
@@ -63,7 +63,7 @@ export async function deliverUpdate(
       const version = isRecord(update) ? update.update_id as number : 0;
       const previous = flow.sourceVersions.get(sourceId);
       // A superseded unsaved source cannot replace a newer session, even if an edit
-      // arrives late. Committed sources are handled above via durable B1 receipts.
+      // arrives late. Committed sources are handled above via durable receipts.
       if (sourceId < flow.latestSourceId && flow.store.get(chatId)?.sourceMessageId !== sourceId) return;
       if (previous !== undefined && version <= previous) return;
       flow.latestSourceId = Math.max(flow.latestSourceId, sourceId);

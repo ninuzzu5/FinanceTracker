@@ -1,53 +1,51 @@
-# CI e controlli prima del merge
+# Verifiche e CI
 
-Il workflow `CI` in `.github/workflows/ci.yml` avvia entrambi i job su:
+Il workflow `CI` avvia i job su push a `dev`/`main`, PR verso questi branch e
+`workflow_dispatch` quando disponibile sul branch predefinito. Non ha filtri sui
+percorsi, non usa `pull_request_target` e non parte su altri branch/tag o destinazioni.
 
-- push ai branch `dev` e `main`;
-- pull request con **branch di destinazione** `dev` o `main`, anche da branch di origine diversi;
-- `workflow_dispatch`, quando disponibile per il workflow sul branch predefinito.
+| Check | Controlli |
+| --- | --- |
+| `test` | Installazione da lockfile, build, typecheck, test, audit completo e di produzione |
+| `SQL integration` | Migrazioni e fixture PGlite, PostgreSQL nativo, concorrenza e integrazione bot |
 
-Nessun filtro sui percorsi e nessuna condizione che salti il job SQL su questi eventi. Push ad altri branch/tag e PR verso altri branch non avviano il workflow. Non si usa `pull_request_target`.
+I job sono indipendenti e ricompilano nel proprio ambiente. Un errore fa fallire
+il job: non ci sono eccezioni che nascondono test o audit falliti. Prima di rendere
+obbligatori i due check, verifica un run completo sulla revisione interessata e
+seleziona i nomi esatti con sorgente GitHub Actions. Le regole remote non sono
+state modificate né verificate da questa pulizia.
 
-## Check e branch protection
+## Ambiente
 
-| Nome esatto del check | ID del job | Controlli |
-| --- | --- | --- |
-| `test` | `test` | `npm ci`, build, typecheck, test applicativi, `npm audit`, `npm audit --omit=dev` |
-| `SQL integration` | `sql-qualification` | Installazione e build, migrazioni/fixture PGlite, PostgreSQL nativo con concorrenza e integrazione bot (`--b1 --audit`) |
+Il workflow usa Ubuntu 24.04 e Node 22 per l’applicazione. Il requisito locale è
+Node almeno 22.12. Le Actions checkout 7.0.1 e setup-node 7.1.0 sono vincolate a
+SHA completi nel [workflow](../.github/workflows/ci.yml); il loro runtime interno
+Node 24 non cambia la versione di Node usata dall’applicazione. L’immagine Ubuntu
+continua a ricevere aggiornamenti; un runner self-hosted richiede una verifica propria.
 
-Prima del merge verso `main` è raccomandato rendere **entrambi** required checks, con sorgente **GitHub Actions**, dopo averli osservati nel primo run riuscito della nuova configurazione. Gli stessi check sono adatti alla protezione di `dev`. Nella vista PR possono apparire sotto il workflow `CI`; nelle impostazioni selezionare i nomi `test` e `SQL integration`. Il vecchio nome `Linux SQL qualification (not yet a required check)` non identifica il nuovo check.
+I permessi sono `contents: read`, checkout senza credenziali persistite e nessun
+segreto applicativo. PGlite 0.5.8 ed embedded-postgres 18.4.0-beta.17 si installano
+in directory temporanee: nessuna dipendenza applicativa aggiuntiva. PGlite non
+esegue lifecycle script; il wrapper PostgreSQL li richiede per i symlink.
+Il database nativo usa password sintetica, cluster temporaneo e socket Unix, senza TCP.
 
-Le regole remote non sono state modificate. Selezionare i check dopo il push e la conferma dei nomi effettivi sullo SHA corrente; verificare che altri workflow non creino check omonimi. Valutare anche l’obbligo di aggiornamento rispetto al branch base. Queste impostazioni sono raccomandate, ma non ancora attive. Riferimento: [required status checks](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-protected-branches/about-protected-branches#require-status-checks-before-merging).
+## Come interpretare i risultati
 
-I due job sono indipendenti e senza matrix. Checkout/installazione/build ripetuti sono necessari perché ogni job ha un ambiente isolato e il test SQL integra il bot compilato; non vengono aggiunti job intermedi o trasferimenti di artefatti. Nessun `continue-on-error`, `|| true`, skip condizionale o intercettazione che trasformi un fallimento in successo. Un errore fa fallire il rispettivo job; gli step successivi di quel job possono essere saltati perché il precedente è fallito.
+Due job verdi verificano compilazione, tipi, test, advisory noti e contratti SQL
+locali: proprietà, saldi, ricevute, correzioni, annullamenti, retry e concorrenza.
+Non certificano Auth/JWT, RLS/grant installati o PostgREST remoti, consegna Telegram,
+backup/ripristino o assenza di ogni vulnerabilità. I test applicativi usano servizi
+simulati. La prova del ripristino rimane da documentare: vedi [sicurezza](../SECURITY.md).
 
-## Runner, Actions e versioni
+Se un controllo fallisce:
 
-Entrambi i job usano **`ubuntu-24.04`**: un’etichetta esplicita evita il passaggio automatico a una nuova distribuzione durante la migrazione di `ubuntu-latest`. È una scelta prudente pre-release, da rivalutare con un run dedicato prima di passare a Ubuntu 26.04. Non congela l’intera immagine: GitHub continua ad aggiornarne gli strumenti. [Immagini ufficiali e politica di migrazione](https://github.com/actions/runner-images#available-images).
+- Riproduci errori di installazione, build, tipi e test con la stessa versione Node e lockfile. La cache non sostituisce `npm ci`.
+- Per un advisory verifica pacchetto, gravità e uso effettivo. Non disabilitare l’audit e non usare automaticamente `audit fix --force`.
+- Per problemi del runtime SQL controlla binari, librerie, symlink, socket e memoria condivisa. Non usare il database personale come alternativa.
+- Considera un’asserzione SQL fallita una regressione finché non è spiegata. Non rimuovere test, ampliare permessi o disabilitare trigger per ottenere verde.
 
-| Action | Release stabile verificata | SHA completo |
-| --- | --- | --- |
-| checkout | [v7.0.1](https://github.com/actions/checkout/releases/tag/v7.0.1) | `3d3c42e5aac5ba805825da76410c181273ba90b1` |
-| setup-node | [v7.1.0](https://github.com/actions/setup-node/releases/tag/v7.1.0) | `949feb2413d6458794dcd2491c4babbbce0c15c1` |
-
-Release non draft e non prerelease verificate tramite API ufficiale, pagine release e relativi commit. Entrambi i manifest dichiarano `runs.using: node24`: [checkout al pin](https://github.com/actions/checkout/blob/3d3c42e5aac5ba805825da76410c181273ba90b1/action.yml), [setup-node al pin](https://github.com/actions/setup-node/blob/949feb2413d6458794dcd2491c4babbbce0c15c1/action.yml). Questo aggiorna il runtime **interno delle Actions**, mentre `node-version: 22` mantiene **Node 22 per FinanceTracker**. I runner hosted supportano il runtime richiesto; eventuali runner self-hosted richiederebbero una verifica separata. Il warning Node 20 e quello relativo a `ubuntu-latest` non sono attesi da queste configurazioni, ma l’assenza effettiva va confermata nelle annotazioni del nuovo run.
-
-Permessi globali solo `contents: read`; checkout con `persist-credentials: false`. Non vengono configurati registry privati, token npm o segreti applicativi. Le nuove regole checkout per eventi privilegiati non richiedono eccezioni perché il workflow usa il normale evento `pull_request`.
-
-Le installazioni temporanee SQL restano quelle già qualificate: PGlite **0.5.8** e wrapper embedded-postgres **18.4.0-beta.17**, invariati. La versione del wrapper è precedente a questo aggiornamento e resta quella già collaudata; le nuove Actions sono release stabili. PGlite si installa senza lifecycle script; il wrapper nativo mantiene gli script necessari ai symlink. Entrambi vivono sotto `RUNNER_TEMP`, fuori dalle dipendenze applicative. PostgreSQL crea un cluster nuovo con password sintetica casuale e socket Unix, senza TCP o connessioni Supabase. Migrazioni e asserzioni restano invariate.
-
-## Significato del risultato
-
-Una CI verde con **entrambi i job eseguiti** verifica la revisione selezionata rispetto a compilazione, tipi, test, advisory noti e contratti contabili locali: saldi, RLS/ownership sintetici, ricevute, correzioni, annullamenti, retry, concorrenza e rollback. Non dimostra assenza di ogni vulnerabilità e non certifica Auth/PostgREST o configurazione del database Supabase reale, consegna Telegram, backup/ripristino o completamento della release. UX-01, accettato nella v1 pubblicata, è corretto e verificato localmente il 22 ottobre 2026, con modifica ancora da pubblicare; OPS-01 resta aperto.
-
-In caso di fallimento aprire il primo step rosso:
-
-- **Installazione/build/typecheck/test:** correggere incompatibilità o regressione e riprodurre dalla stessa versione Node e lockfile. La cache npm non sostituisce `npm ci`.
-- **Audit npm:** esaminare pacchetto, advisory e raggiungibilità; aggiornare con revisione oppure documentare una decisione esplicita. Non disabilitare il controllo o usare automaticamente `audit fix --force`.
-- **Runtime SQL/setup:** controllare log di download, binari, librerie di sistema, symlink, memoria condivisa e socket del runner; non sostituire il database temporaneo con quello personale.
-- **Asserzione SQL/concorrenza:** considerarla una regressione finché non è spiegata e riprodotta. Non eliminare verifiche, ampliare permessi o disabilitare trigger per ottenere verde.
-
-Non registrare credenziali o dati personali per diagnosticare un errore. Un singolo retry per un problema infrastrutturale deve mantenere evidenza del fallimento iniziale; errori ripetuti richiedono indagine.
+Non registrare segreti o dati personali. Un retry infrastrutturale deve conservare
+l’evidenza del fallimento; errori ripetuti richiedono indagine.
 
 ## Riproduzione locale
 
@@ -77,17 +75,17 @@ node supabase/tests/run-cash-concurrency.mjs "$FT_NATIVE_RUNTIME/node_modules/em
 
 Il nativo richiede socket Unix, esecuzione dei binari e memoria condivisa; in un sandbox possono servire permessi locali aggiuntivi. Non usare credenziali o URL di database reali. Con actionlint disponibile: `actionlint .github/workflows/ci.yml`.
 
-## Evidenze e verifica dopo il push
+## Evidenze disponibili
 
-È stato riportato il successo su Linux dei job applicativo e SQL del commit **`7464879fe6e1be5c07002b2584cf08825ac8f867`**. Il risultato riguarda la configurazione precedente, non quella con Actions aggiornate e versione Ubuntu esplicita.
+I risultati seguenti sono osservazioni datate, non nuove verifiche remote:
 
-Controlli eseguiti localmente durante la finalizzazione della CI su macOS/Node 22.23.3: build, typecheck, **649 test** (420 bot e 229 dominio), audit completo/produttivo con zero advisory, actionlint e controllo del diff. La validazione degli eventi comprende push dev/main, PR verso entrambi i branch, avvio manuale e scarto degli eventi fuori scope. Controllati SHA/runtime ufficiali, ordine installazione/build e conservazione dei comandi SQL. Nessuna suite o asserzione SQL modificata e nessuna nuova esecuzione hosted dichiarata superata.
+- Il 19 ottobre 2026 su macOS/Node 22.23.3 sono passati build, typecheck, 649 test, audit, actionlint e prove SQL, comprese 25 sessioni concorrenti e recupero dopo risposta persa. PGlite è stato verificato anche su Node 24; gli snapshot testuali distinguono date infinite e conservano le righe legacy senza arrotondamenti.
+- È stato riportato un run Linux riuscito sul commit `7464879fe6e1be5c07002b2584cf08825ac8f867`. Riguarda la configurazione precedente: non dimostra l’esecuzione della nuova definizione con Actions aggiornate e Ubuntu esplicito.
+- Il 22 ottobre la correzione degli edit Telegram estranei è stata verificata localmente. La release pubblicata v1.0.0 non è stata modificata.
+- Il [resoconto del frontend](w1-frontend.md) conserva le prove locali successive e i limiti del collaudo visuale.
 
-Dopo la revisione delle modifiche, il commit e il push:
-
-1. Aprire **Actions → CI** sul nuovo SHA di `dev`; attendere **entrambi** `test` e `SQL integration` riusciti, senza skip.
-2. Verificare in **Set up job** Ubuntu 24.04, negli step checkout/setup i pin v7, e nel setup applicativo Node 22. Controllare le annotazioni per i warning precedenti.
-3. Nel job SQL verificare che PGlite e PostgreSQL nativo siano entrambi eseguiti e che i log completino B1/B2/B3/B/C, concorrenza e rollback. Il solo successo dell’installazione non basta.
-4. Sulla successiva PR verso `main` o `dev`, verificare i due check sullo SHA della PR/merge di test. Solo dopo il primo run della nuova definizione scegliere i nomi esatti nelle regole di protezione del branch.
-
-Nessuna regola di branch protection è stata attivata da questa modifica. La nuova CI hosted e i warning restano da verificare dopo il push; la release v1.0.0 non è ancora conclusa.
+Non risulta documentata una verifica hosted della nuova definizione o delle
+protezioni dei branch. In un futuro run controlla lo SHA, entrambi i job senza
+skip, versioni del runner, annotazioni, fixture SQL e concorrenza completate.
+L’installazione riuscita da sola non verifica le asserzioni. Per il controllo
+manuale del database di test usa la [guida Supabase](../supabase/README.md).
