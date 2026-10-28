@@ -75,15 +75,21 @@ select pg_temp.management_check((select count(*)=5 from public.transaction_chang
 select pg_temp.management_check((select balance=1.20 from public.get_account_balances('2026-01-02') where account_name='Contanti'));
 -- Balance read contract after 008: negative bank, inactive extra account, huge exact cents,
 -- explicit NULL states; no application-side reconstruction of the ledger.
-update public.accounts set is_active=false where name='Isybank';
+reset role;
+update public.accounts set is_active=false where name='Isybank' and user_id='00000000-0000-4000-8000-000000000091';
+set local role authenticated;
 select pg_temp.management_check((select balance=-10 and not is_active from public.get_account_balances('2026-01-03') where account_name='Isybank'));
+reset role;
 insert into public.accounts(user_id,name,type,opening_balance,opening_date,is_active) values
- (auth.uid(),'Archivio','bank',9007199254740992.29,'2026-01-01',false),
- (auth.uid(),'Da configurare','bank',null,null,true);
+ ('00000000-0000-4000-8000-000000000091','Archivio','bank',9007199254740992.29,'2026-01-01',false),
+ ('00000000-0000-4000-8000-000000000091','Da configurare','bank',null,null,true);
+set local role authenticated;
 select pg_temp.management_check((select balance=9007199254740992.29 and not is_active from public.get_account_balances('2026-01-03') where account_name='Archivio'));
 select pg_temp.management_check((select balance is null and status='not_configured' from public.get_account_balances('2026-01-03') where account_name='Da configurare'));
 select pg_temp.management_check((select balance is null and status='before_opening' from public.get_account_balances('2025-12-31') where account_name='Contanti'));
-select pg_temp.management_error($q$insert into public.transactions(user_id,type,amount,transaction_date,category,to_account_id,ledger_version) values(auth.uid(),'income',1,'2026-01-04','salary','10000000-0000-4000-8000-000000000091',2)$q$,'22023');
+reset role;
+select pg_temp.management_error($q$insert into public.transactions(user_id,type,amount,transaction_date,category,to_account_id,ledger_version) values('00000000-0000-4000-8000-000000000091','income',1,'2026-01-04','salary','10000000-0000-4000-8000-000000000091',2)$q$,'22023');
+set local role authenticated;
 -- Privileges and RLS: no direct edits/deletes/audit writes, no foreign management/read/receipt.
 select pg_temp.management_error('update public.transactions set amount=1','42501');
 select pg_temp.management_error('delete from public.transactions','42501');

@@ -2,7 +2,7 @@
 
 Questa directory descrive lo schema applicativo versionato, non lo stato verificato
 del progetto remoto. Il codice attuale usa aperture/saldi, riconciliazione Contanti,
-ricevute idempotenti e vincoli EUR/monetari delle migrazioni fino a 008.
+ricevute idempotenti e vincoli EUR/monetari; la migrazione 009 riserva le scritture alle RPC.
 Nessuna migrazione è applicata automaticamente dal bot.
 
 ## Migration order
@@ -17,14 +17,60 @@ Nessuna migrazione è applicata automaticamente dal bot.
 | [006](migrations/006_transaction_idempotency.sql) | transaction_receipts, save_transaction_once e get_transaction_receipt | Dopo 005, con RLS attiva e oggetti 006 assenti |
 | [007](migrations/007_monetary_integrity_and_eur.sql) | CHECK importi/date, EUR per tutti i conti, controllo EUR nella RPC di salvataggio | Dopo 006 e [preflight READ ONLY](preflight/007_monetary_integrity_and_eur.sql) |
 | [008](migrations/008_transaction_management.sql) | Versioni, annullamento logico, audit e RPC storiche; saldi senza movimenti annullati | Dopo 007 e [preflight READ ONLY](preflight/008_transaction_management.sql); revoca UPDATE/DELETE diretti |
+| [009](migrations/009_restrict_ledger_writes.sql) | Revoca scritture dirette su conti e transazioni, comprese colonne e PUBLIC; verifica ruoli ereditati e proprietari RPC | Dopo 008 e confronto dei privilegi effettivi; nessuna modifica dei dati |
 
-**Database nuovo:** 001 → 002 → 004 → 005 → 006 → 007 → 008. La baseline 001
+**Database nuovo:** 001 → 002 → 004 → 005 → 006 → 007 → 008 → 009. La baseline 001
 include già il CHECK corretto: non eseguire 003 come passaggio obbligatorio.
 **Database esistente:** confronta catalogo, policy, grant e vincoli; applica soltanto
 i passaggi mancanti, nell'ordine dipendente. Non dedurre applicazione dal nome dei
 file o dal branch. Non rilanciare 001/002 e non rieseguire 003 se già corretto.
 Anche 004–008 vanno applicate una volta: non sono script di reset/riparazione
 idempotenti; 007 sostituisce una RPC ma aggiunge vincoli senza IF NOT EXISTS.
+
+## Scritture applicative e aperture dei conti
+
+Con [009](migrations/009_restrict_ledger_writes.sql), i client possono leggere i
+propri conti e movimenti, ma non inserirli, modificarli o cancellarli direttamente.
+Sono revocati anche TRUNCATE, REFERENCES e TRIGGER, oltre ai grant di scrittura
+e REFERENCES delle singole colonne, da PUBLIC, anon e authenticated.
+Le nuove transazioni passano da `save_transaction_once`; correzioni e chiusure
+mantengono le RPC esistenti, le ricevute, l'audit e i lock Contanti.
+
+Non esiste una RPC di gestione conti. Il provisioning resta amministrativo;
+aperture e configurazione non sono modificabili dai client. Una correzione
+amministrativa richiede valori verificati, motivazione, confronto prima/dopo e
+registrazione privata dell'intervento. Non disabilitare i trigger Contanti.
+Amministratori e service_role restano privilegiati: non usarli nel browser o
+come credenziali ordinarie del bot.
+
+Per una successiva applicazione su un database esistente:
+
+1. Verifica backup e recupero, schema fino a 008, RLS, policy, trigger, proprietari
+   e configurazione delle RPC. Inventaria gli strumenti che scrivono direttamente.
+2. Esamina ACL di tabella e colonna, grant option, PUBLIC e appartenenze dei ruoli.
+   Controlla i permessi effettivi con `has_table_privilege`,
+   `has_any_column_privilege` e `pg_has_role`, non soltanto i grant nominali.
+3. Qualifica prima la migrazione e le regressioni su un database temporaneo con
+   dati sintetici. Concorda una breve sospensione delle scritture prima del rilascio.
+4. Applica soltanto 009, nella sua transazione, con il ruolo amministrativo
+   autorizzato. Non esegue INSERT, UPDATE o DELETE sui dati esistenti.
+   I proprietari delle RPC sono controllati dopo le revoche, comprese le
+   autorizzazioni necessarie ai lock. RLS, policy, trigger e funzioni non cambiano.
+5. Privilegi residui tramite ruoli ereditati, proprietari RPC incompatibili o grant
+   dipendenti impediscono il COMMIT. Esegui ROLLBACK se il client lascia aperta
+   la transazione fallita; esamina la causa prima di riprovare. Nessun CASCADE,
+   cambio di appartenenza o ampliamento dei permessi è automatico.
+6. Dopo il COMMIT ricontrolla letture, RPC e assenza di scritture dirette; controlla
+   separatamente Auth e PostgREST. Riprendi una sola istanza del bot. Preferisci
+   una correzione in avanti: ripristinare i vecchi grant riaprirebbe il problema.
+
+I runner SQL verificano dati invariati, grant di colonna e PUBLIC, ereditarietà
+indiretta anche senza INHERIT, rollback su proprietario RPC incompatibile,
+riapplicazione e rifiuto delle scritture dirette. Dopo 009 eseguono nuovamente
+le prove di gestione e storico; il nativo verifica anche retry, riconciliazioni,
+audit e integrazione del bot in sessioni concorrenti. Le fixture dei vecchi
+schemi restano eseguite prima delle rispettive restrizioni. Nessun runner legge
+credenziali o apre connessioni al progetto remoto.
 
 Tutti i file sono transazionali: provare su un progetto di test separato, fermare
 le scritture durante DDL, incollare **l'intero file** BEGIN/COMMIT inclusi nel SQL
@@ -92,7 +138,7 @@ Real values stay in the ignored `.env.local` file or private runtime environment
 
 ## Validation
 
-Normal application tests mock the SDK and never contact the real database. See [the bot guide](../docs/bot-guide.md) for manual application checks. The SQL runner applies 001/002/004/005/006/007/008, reruns balance/reconciliation/idempotency suites and tests history and integrity. Its assertions execute in disposable embedded PostgreSQL (PGlite), with a minimal local Supabase Auth contract. Hosted Supabase Auth and the remote catalog are not tested. The SQL runner is separate from the default Vitest suite. It also runs in the SQL integration CI job on dev/main pushes and PRs targeting those branches; it never reads credentials or connects to a remote database.
+I test applicativi simulano l'SDK e non contattano il database reale. Per il collaudo manuale vedi la [guida Telegram](../docs/bot-guide.md). Il runner SQL applica 001/002/004/005/006/007/008/009 e verifica saldi, riconciliazione, idempotenza, storico, audit e privilegi. Usa PGlite temporaneo con un contratto minimo di Auth; non certifica Auth ospitata o catalogo remoto. È separato da Vitest ed eseguito anche dalla CI SQL. Non legge credenziali e non apre connessioni remote.
 
 
 ## CI e qualificazione Linux
@@ -272,7 +318,7 @@ FX. Per il patrimonio dei tre conti usa EUR e non sommare valute diverse.
 ### Test senza dati reali né aperture arbitrarie
 
 Il runner `tests/run-account-balances.mjs` avvia PostgreSQL in memoria, con una
-simulazione minima di auth.uid/users/ruoli, applica 001, 002 e 004–008 e verifica anche
+simulazione minima di auth.uid/users/ruoli, applica 001, 002 e 004–009 e verifica anche
 che le transazioni preesistenti rimangano identiche. Non legge `.env`, non contatta
 Supabase e non usa un database su disco. Gli importi sintetici dei test non sono
 valori da trasferire ai conti personali. Nessuna modalità demo/reale è introdotta.
@@ -734,7 +780,7 @@ File: [008_transaction_management.sql](migrations/008_transaction_management.sql
 
 Per `void`, tutti i nuovi campi finanziari devono essere NULL. Per `edit` sono richiesti tutti i campi pertinenti, senza modifica parziale. Conti attivi posseduti in EUR, vincoli 007 e categorie del tipo sono ricontrollati dal database. Il proprietario autenticato coincide con l'autore; non è accettato user_id dal client.
 
-UPDATE/DELETE diretti su transactions sono revocati ad authenticated. INSERT resta conforme alle policy precedenti; solo il percorso di salvataggio con ricevuta offre idempotenza dei nuovi movimenti. Il registro è leggibile solo dal proprietario e non modificabile direttamente. Nessuna modifica delle migrazioni 001–007 o delle ricevute di creazione.
+La 008 revoca UPDATE/DELETE diretti su transactions ad authenticated; la successiva 009 revoca anche INSERT e le scritture sui conti. Il registro è leggibile solo dal proprietario e non modificabile direttamente. Le migrazioni precedenti e le ricevute di creazione non vengono riscritte.
 
 I lock sono: advisory richiesta → conti Contanti propri ordinati per UUID → riga transazione. Le correzioni bancarie acquisiscono anch'esse i lock Contanti per mantenere un unico ordine prudente. Il trigger 005 resta invariato e verifica OLD/NEW anche per l'annullamento; riconciliazione e correzione non possono superarsi senza ricalcolo/conflitto. Serve READ COMMITTED.
 
@@ -784,7 +830,7 @@ una procedura specifica né considera collaudato un backup non ripristinato.
 
 1. Registra disponibilità, frequenza, retention e punto recuperabile del backup, perdita massima accettabile e tempo di ripartenza. Verifica separatamente cosa viene conservato di Auth e dei proprietari.
 2. Prova il ripristino in un progetto isolato, mai sopra i dati personali come esperimento. Proteggi il backup come i dati originali: niente file o credenziali nel repository.
-3. Confronta migrazioni e catalogo fino a 008: RLS, grant effettivi, FK di proprietà, trigger Contanti, vincoli monetari/date/EUR, RPC e registro delle correzioni. I preflight non certificano policy personalizzate o tutti i grant ereditati.
+3. Confronta migrazioni e catalogo fino a 009: RLS, grant effettivi di tabella e colonna, PUBLIC e ruoli ereditati, FK di proprietà, trigger Contanti, vincoli monetari/date/EUR, RPC e registro delle correzioni. I preflight precedenti non certificano policy personalizzate o tutti i grant ereditati.
 4. Con utenti Auth reali di test verifica che un proprietario non possa leggere o modificare righe, ricevute e correzioni di un altro, e che l’accesso anonimo non permetta operazioni protette. Non usare l’SQL Editor amministrativo come prova di RLS.
 5. Verifica almeno un movimento modificato, uno annullato, una ricevuta di creazione, una di correzione e una chiusura Contanti. Saldi e retry devono corrispondere al punto del backup; controlla anche gli importi testuali via PostgREST.
 6. Prima di riavviare il bot riconcilia le operazioni successive al punto recuperato. Una scrittura o ricevuta persa può rendere pericoloso reinviare vecchi messaggi: non applicarli automaticamente.

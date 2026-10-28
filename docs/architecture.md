@@ -1,7 +1,7 @@
 # Architettura
 
 FinanceTracker separa dominio, bot, frontend e database. Il codice locale richiede
-le migrazioni fino a 008; la presenza dei file non certifica lo schema remoto.
+le migrazioni fino a 009; la presenza dei file non certifica lo schema remoto.
 Per avvio e uso vedi la [guida Telegram](bot-guide.md); per lo schema la
 [guida Supabase](../supabase/README.md).
 
@@ -66,8 +66,9 @@ messaggio resta una nuova operazione anche quando il contenuto è identico.
 ricevuta nella stessa transazione. La richiesta usa importi decimali testuali.
 Unicità proprietario/richiesta, lock advisory e payload canonico proteggono retry
 e conflitti. Una ricevuta coerente viene restituita prima dei controlli su conti
-poi disattivati o giornate poi chiuse. La protezione non copre inserimenti diretti
-o storico precedente a 006. Il namespace presuppone un bot per proprietario.
+poi disattivati o giornate poi chiuse. La protezione non copre lo storico precedente
+a 006. La migrazione 009 vieta nuove scritture dirette dai client applicativi.
+Il namespace presuppone un bot per proprietario.
 
 RLS e FK composite isolano i proprietari. Le RPC di scrittura sono
 `SECURITY DEFINER`, con `auth.uid()`, filtri espliciti e `search_path` vuoto;
@@ -109,8 +110,12 @@ ordinati → movimento. Anche le correzioni bancarie acquisiscono i lock Contant
 per mantenere l’ordine comune con le chiusure. Serve `READ COMMITTED`.
 I trigger controllano vecchi e nuovi riferimenti anche nell’annullamento.
 
-`authenticated` non può fare UPDATE/DELETE diretti sulle transazioni. I trigger
-richiedono stato iniziale valido e incremento di versione con audit coerente.
+Con 009, `anon`, `authenticated` e `PUBLIC` non hanno permessi diretti di scrittura
+su conti e transazioni, neppure di colonna. Privilegi residui tramite altri ruoli
+fanno fallire e annullare la migrazione, senza revocare appartenenze condivise.
+Le aperture sono leggibili ma non modificabili dai client; eventuali correzioni
+amministrative richiedono una procedura revisionata e tracciata.
+I trigger richiedono stato iniziale valido e incremento di versione con audit coerente.
 Le ricevute di creazione restano valide dopo le correzioni. Dopo riavvio un vecchio
 pulsante può soltanto leggere una ricevuta, senza ricostruire o reinviare una scrittura.
 

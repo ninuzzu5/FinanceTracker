@@ -106,6 +106,20 @@ try {
   await admin.query(await read('../preflight/008_transaction_management.sql'));
   await admin.query(await read('../migrations/008_transaction_management.sql'));
   await admin.query(await read('transaction_management.sql'));
+  const {qualifyPrivilegeMigration} = await import('./privilege-migration.mjs');
+  await qualifyPrivilegeMigration({exec: sql => admin.query(sql), query: sql => admin.query(sql)});
+  await admin.query(await read('ledger_privileges.sql'));
+  await admin.query(await read('transaction_management.sql'));
+  await admin.query(await read('history.sql'));
+  // Le prove seguenti operano con i privilegi finali, senza scritture dirette.
+  const {transactionConcurrency: securedTransactions} = await import('./transaction-concurrency.mjs');
+  const securedUser='00000000-0000-4000-8000-000000000097', securedCash='10000000-0000-4000-8000-000000000097';
+  await admin.query('insert into auth.users values ($1)', [securedUser]);
+  await admin.query(`insert into public.accounts(id,user_id,name,type,opening_balance,opening_date) values
+    ($1,$2,'Contanti','cash',100,'2026-01-01'),('10000000-0000-4000-8000-000000000098',$2,'Revolut','bank',100,'2026-01-01')`, [securedCash,securedUser]);
+  await securedTransactions({admin,connect,user:securedUser,cash:securedCash,restricted:true});
+  await Promise.allSettled(clients.filter(c=>c!==admin).map(c=>c.end()));
+  clients.splice(0,clients.length,admin);
   const {managementConcurrency}=await import('./management-concurrency.mjs');
   await managementConcurrency({admin,connect,mustWait});
   console.log('Native PostgreSQL passed: SQL fixtures, five concurrent lock scenarios, snapshot-isolation rejection. No remote connections.');

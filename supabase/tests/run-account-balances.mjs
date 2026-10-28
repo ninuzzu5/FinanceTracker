@@ -104,6 +104,12 @@ try {
   await db.exec(await read('transaction_management.sql'));
   await db.exec(await read('history.sql'));
   console.log('B/C SQL passed: audited/idempotent corrections, cancellation, balances, RLS, cash closure guards and B1 receipts.');
+  const {qualifyPrivilegeMigration} = await import('./privilege-migration.mjs');
+  await qualifyPrivilegeMigration({exec: sql => db.exec(sql), query: sql => db.query(sql)});
+  await db.exec(await read('ledger_privileges.sql'));
+  await db.exec(await read('transaction_management.sql'));
+  await db.exec(await read('history.sql'));
+  console.log('Regressioni SQL dopo le revoche: RPC di scrittura, audit, riconciliazione, saldi e storico verificati.');
 } finally {
   await db.close();
 }

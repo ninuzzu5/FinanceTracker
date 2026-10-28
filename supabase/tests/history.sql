@@ -25,8 +25,7 @@ select pg_temp.history_check((select array_agg(id::text) = array[
 select pg_temp.history_check((select count(*)=2 from public.transactions where user_id=auth.uid()
  and (transaction_date<'2026-10-09' or (transaction_date='2026-10-09' and id<'30000000-0000-4000-8000-000000000003'))));
 -- A new more recent row does not shift the second page or duplicate the first page's entries.
-insert into public.transactions(user_id,type,amount,transaction_date,from_account_id,to_account_id)
- values(auth.uid(),'transfer',0.01,'2026-10-10','10000000-0000-4000-8000-000000000081','10000000-0000-4000-8000-000000000082');
+select * from public.save_transaction_once(gen_random_uuid(),'transfer',0.01,'2026-10-10',null,'revolut','contanti');
 select pg_temp.history_check((select count(*)=2 from public.transactions where user_id=auth.uid()
  and (transaction_date<'2026-10-09' or (transaction_date='2026-10-09' and id<'30000000-0000-4000-8000-000000000003'))));
 select pg_temp.history_check((select count(*)=1 from public.transactions t join public.accounts s on s.id=t.from_account_id

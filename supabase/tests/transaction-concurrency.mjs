@@ -1,10 +1,23 @@
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
 // Only receives connections to the caller's disposable local cluster.
-export async function transactionConcurrency({admin,connect,user,cash}) {
+export async function transactionConcurrency({admin,connect,user,cash,restricted=false}) {
   const workers=await Promise.all(Array.from({length:25},async()=>{
     const c=await connect();await c.query(`set role authenticated; select set_config('request.jwt.claim.sub','${user}',false)`);return c;
   }));
+  if (restricted) {
+    await Promise.all(workers.map(async c => {
+      for (const sql of [
+        "insert into public.transactions(user_id,type,amount,transaction_date,category,to_account_id) values(auth.uid(),'income',1,'2026-09-01','salary',$1)",
+        'update public.transactions set amount=1 where to_account_id=$1',
+        'delete from public.transactions where to_account_id=$1',
+        "insert into public.accounts(user_id,name,type,id) values(auth.uid(),'Nuovo','bank',$1)",
+        'update public.accounts set opening_balance=999 where id=$1',
+        'delete from public.accounts where id=$1',
+      ]) await assert.rejects(c.query(sql,[cash]), {code:'42501'});
+    }));
+    console.log('Privilegi concorrenti: 150 scritture dirette rifiutate in 25 sessioni autenticate.');
+  }
   const save=(c,key,amount='0.01',type='expense',from='revolut',to=null,category='food',date='2026-09-01')=>c.query(
     'select * from public.save_transaction_once($1,$2,$3,$4,$5,$6,$7)',[key,type,amount,date,category,from,to]);
   const count=async()=>(await admin.query('select count(*)::int n from public.transactions')).rows[0].n;

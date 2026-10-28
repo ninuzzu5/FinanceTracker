@@ -33,6 +33,8 @@ Il database nativo usa password sintetica, cluster temporaneo e socket Unix, sen
 
 Due job verdi verificano compilazione, tipi, test, advisory noti e contratti SQL
 locali: proprietà, saldi, ricevute, correzioni, annullamenti, retry e concorrenza.
+La suite verifica anche le revoche di tabella e colonna, i grant PUBLIC, il rollback
+su privilegi ereditati o proprietari RPC incompatibili e le RPC dopo le revoche.
 Non certificano Auth/JWT, RLS/grant installati o PostgREST remoti, consegna Telegram,
 backup/ripristino o assenza di ogni vulnerabilità. I test applicativi usano servizi
 simulati. La prova del ripristino rimane da documentare: vedi [sicurezza](../SECURITY.md).

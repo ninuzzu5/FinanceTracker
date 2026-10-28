@@ -65,7 +65,7 @@ ID personali, saldi o esportazioni reali: vedi [sicurezza](SECURITY.md).
 ## Limiti noti
 
 - Usa una sola istanza di polling, senza webhook attivo. Bozze e offset sono in memoria; le bozze scadono dopo 30 minuti e si perdono al riavvio. Le risposte Telegram possono mancare o duplicarsi anche con una scrittura riuscita.
-- Dopo un timeout ritenta dallo stesso pulsante: un nuovo messaggio è una nuova operazione. Annullare il flusso non annulla una scrittura già riuscita. Gli inserimenti diretti e lo storico precedente alla migrazione 006 non hanno la stessa protezione dai duplicati.
+- Dopo un timeout ritenta dallo stesso pulsante: un nuovo messaggio è una nuova operazione. Annullare il flusso non annulla una scrittura già riuscita. Lo storico precedente alla migrazione 006 non ha la stessa protezione dai duplicati; con 009 le nuove scritture applicative passano soltanto dalle RPC.
 - Le aperture sono manuali. Un saldo non configurato non vale zero. Le giornate Contanti chiuse non si possono riaprire; le correzioni mantengono il tipo del movimento e l’annullamento lo esclude anche dai saldi storici.
 - Lo schema remoto e Auth/RLS non sono stati verificati da questa pulizia. Non è documentata una prova completata di backup/ripristino. Le [verifiche locali](docs/ci.md) non sostituiscono queste prove o il collaudo Telegram reale.
 - La versione pubblicata v1.0.0 conserva un problema con le modifiche a messaggi estranei; il codice locale lo corregge. Per compilare i campi invia nuove risposte e controlla sempre il riepilogo.
