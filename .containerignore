@@ -1,0 +1,36 @@
+# Allow only manifests and the TypeScript inputs needed for the bot build.
+# In particular: no .git, node_modules, local dist, web sources or private data.
+**
+!package.json
+!package-lock.json
+!apps/
+!apps/bot/
+!apps/bot/package.json
+!apps/bot/tsconfig.json
+!apps/bot/src/
+!apps/bot/src/**
+!apps/bot/api/
+!apps/bot/api/**
+!apps/web/
+!apps/web/package.json
+!packages/
+!packages/domain/
+!packages/domain/package.json
+!packages/domain/tsconfig.json
+!packages/domain/src/
+!packages/domain/src/**
+
+# Keep secrets excluded even if accidentally placed under an allowed directory.
+**/.env*
+**/.npmrc
+**/*.pem
+**/*.key
+**/*.p12
+**/*.pfx
+**/*.keystore
+**/id_rsa*
+**/id_ed25519*
+**/secrets/**
+**/node_modules/**
+**/dist/**
+**/.DS_Store

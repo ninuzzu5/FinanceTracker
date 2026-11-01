@@ -45,11 +45,11 @@ describe("local entrypoint", () => {
     expect(process.exitCode).toBe(1);
   });
 
-  it("aborts cleanly on Ctrl+C and removes its signal handlers", async () => {
-    const listenersBefore = process.listenerCount("SIGINT");
+  it.each(["SIGINT", "SIGTERM"] as const)("aborts cleanly on %s and removes its signal handlers", async (signalName) => {
+    const listenersBefore = process.listenerCount(signalName);
     vi.mocked(runPolling).mockImplementation(async (_client, _config, signal, options) => {
       options?.onReady?.();
-      process.emit("SIGINT");
+      process.emit(signalName);
       expect(signal.aborted).toBe(true);
       signal.throwIfAborted();
     });
@@ -58,7 +58,7 @@ describe("local entrypoint", () => {
     expect(console.log).toHaveBeenCalledWith("Bot locale arrestato.");
     expect(console.error).not.toHaveBeenCalled();
     expect(process.exitCode).toBeUndefined();
-    expect(process.listenerCount("SIGINT")).toBe(listenersBefore);
+    expect(process.listenerCount(signalName)).toBe(listenersBefore);
     expect(fetch).not.toHaveBeenCalled();
   });
 

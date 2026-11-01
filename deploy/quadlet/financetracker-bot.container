@@ -1,0 +1,29 @@
+[Unit]
+Description=FinanceTracker Telegram bot (polling)
+# Retry after temporary DNS/network failures, including during boot.
+StartLimitIntervalSec=0
+
+[Container]
+Image=localhost/financetracker-bot:current
+Pull=never
+ContainerName=financetracker-bot
+WorkingDir=/app
+# Map the calling user's UID/GID to the official Node image's node user.
+UserNS=keep-id:uid=1000,gid=1000
+User=1000:1000
+Volume=/home/debian/.config/financetracker/.env.local:/app/.env.local:ro
+ReadOnly=true
+NoNewPrivileges=true
+DropCapability=all
+LogDriver=journald
+StopSignal=SIGTERM
+StopTimeout=60
+
+[Service]
+Restart=on-failure
+RestartSec=15
+TimeoutStartSec=120
+TimeoutStopSec=90
+
+[Install]
+WantedBy=default.target
