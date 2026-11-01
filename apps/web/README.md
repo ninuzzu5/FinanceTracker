@@ -1,7 +1,7 @@
 # Dashboard web
 
 Frontend React 19, TypeScript e Vite 8 nel workspace `@finance-tracker/web`.
-Richiede Node.js almeno 22.12. L'accesso email/password usa Supabase Auth;
+Richiede Node.js almeno 22.12. L’accesso email/password e il secondo fattore TOTP usano Supabase Auth;
 la dashboard conserva esclusivamente i dati sintetici di `src/data/demo.ts`.
 Non vengono lette tabelle, chiamate RPC contabili o modificate transazioni.
 
@@ -17,12 +17,13 @@ if [ ! -e apps/web/.env.local ]; then
 fi
 ```
 
-Compila privatamente `apps/web/.env.local` con queste due variabili:
+Compila privatamente `apps/web/.env.local` con queste tre variabili:
 
 | Variabile | Valore necessario |
 | --- | --- |
 | `VITE_SUPABASE_URL` | URL pubblico HTTPS del progetto, senza credenziali, query o percorsi aggiuntivi |
 | `VITE_SUPABASE_PUBLISHABLE_KEY` | Chiave pubblica `sb_publishable_…`; in alternativa, chiave legacy JWT con ruolo `anon` |
+| `VITE_SUPABASE_WEB_USER_ID` | UUID di un account Auth dedicato al web, distinto dall’utente del bot |
 
 Il file è ignorato da Git. Non copiare il `.env.local` della root: appartiene al
 bot e contiene credenziali private. Non aggiungere password Auth, token Telegram,
@@ -31,20 +32,20 @@ solo nel modulo di accesso, non nella configurazione Vite.
 
 Vite legge l'ambiente di `apps/web`, senza usare il file privato del bot. Le
 variabili di processo hanno precedenza; dopo modifiche riavvia Vite o ricompila.
-URL e chiave pubblica sono incorporati nel JavaScript e leggibili dagli utenti.
+URL, chiave pubblica e UUID dell’account web sono incorporati nel JavaScript e leggibili dagli utenti; l’UUID è un identificativo, non un segreto né una policy di autorizzazione.
 La configurazione mantiene `envPrefix: []` e usa `define` per consentire soltanto
-i due nomi esatti: un prefisso, anche completo, esporrebbe anche eventuali nomi
+i tre nomi esatti: un prefisso, anche completo, esporrebbe anche eventuali nomi
 con suffissi privati. Le chiavi privilegiate e gli URL non validi vengono rifiutati
 prima della build. Con entrambe le variabili assenti la build riesce, ma il modulo
 spiega la configurazione mancante e disabilita l'accesso; una configurazione
-parziale o non valida impedisce l'avvio/build con un errore privo di valori.
+URL/chiave parziali o valori non validi impediscono l’avvio/build con un errore privo di valori. Se manca solo l’UUID, la build riesce ma Auth resta disabilitato, senza inizializzare il client.
 
 ```bash
 npm run web:dev
 ```
 
 Apri `http://127.0.0.1:5173/`. Senza una sessione verificata viene mostrato
-`/accesso`. Dopo il login riuscito si apre `/`, con il banner Dati di esempio.
+`/accesso`. Dopo email/password viene richiesto Authenticator; `/` si apre soltanto a livello `aal2`, con il banner Dati di esempio.
 Non eseguire `npm run bot:dev` per provare il frontend.
 
 ## Controlli manuali nella console Supabase
@@ -56,7 +57,10 @@ Nessuna impostazione remota è stata modificata da questa attività.
    Non utilizzare una chiave privilegiata, nemmeno per risolvere errori di login.
 2. Verifica che il provider Email e l'accesso con password siano abilitati e che
    l'account autorizzato esista e sia confermato, se la conferma email è richiesta.
-   L'interfaccia non offre registrazione né recupero password. Se occorre un
+   Prepara un account web distinto dal bot e confronta manualmente i due UUID
+   nella console prima di impostare `VITE_SUPABASE_WEB_USER_ID`. Non cambiare
+   email, password, fattori o sessioni del bot.
+   L’interfaccia non offre registrazione né recupero password. Se occorre un
    account, predisponilo manualmente nella console con la procedura amministrativa.
 3. Per un'app personale, verifica che la registrazione pubblica sia disabilitata
    anche nel progetto: nascondere il pulsante non disabilita l'API di signup.
@@ -67,15 +71,18 @@ Nessuna impostazione remota è stata modificata da questa attività.
    potrebbero interrompere il bot se usa lo stesso account. Usa esclusivamente
    credenziali utente autorizzate e un profilo browser fidato.
 
-Non sono richieste modifiche a schema, RLS, RPC o migrazioni. Se il progetto
-richiede CAPTCHA o MFA, questi passaggi non sono implementati dal modulo:
-non disabilitare le protezioni del progetto; occorre una successiva integrazione.
+Verifica che il fattore TOTP sia disponibile nelle impostazioni MFA del progetto.
+Non sono richieste modifiche a schema, RLS, RPC o migrazioni. Non aggiungere policy
+MFA globali: il bot usa sessioni password `aal1`. Se è richiesto CAPTCHA, occorre
+un’integrazione successiva; non disabilitare le protezioni per aggirare un errore.
 
 ## Sessione, verifica e logout
 
 `AuthProvider` centralizza gli stati iniziale, anonimo, autenticato e di errore.
 Ripristina la sessione con `getSession()` e verifica l'utente con `getUser(token)`
-prima di montare la dashboard; il contenuto resta nascosto durante la verifica.
+prima di montare la dashboard. Controlla anche `getAuthenticatorAssuranceLevel(token)`
+e `listFactors()`: occorrono `currentLevel === "aal2"`, un fattore TOTP verificato
+e l’identità web configurata. Il contenuto resta nascosto durante la verifica.
 Ascolta `onAuthStateChange()` per accesso, aggiornamento token e uscita anche
 tra schede. Le operazioni Auth sono differite fuori dal callback, per evitare
 l'attesa del lock Auth. Le risposte obsolete vengono ignorate e le sottoscrizioni
@@ -119,8 +126,9 @@ token già emesso può restare valido fino alla propria scadenza.
 
 1. Visita `/` senza sessione: attendi la verifica e controlla il redirect a `/accesso`.
 2. Prova campi vuoti e credenziali errate: resta nel modulo, senza dettagli SDK.
-3. Usa un account autorizzato: durante l'invio il pulsante è disabilitato; al
-   successo compare la dashboard con soli dati sintetici.
+3. Usa l’account web dedicato, mai quello del bot. Dopo email/password completa
+   Authenticator; il pulsante resta disabilitato durante le richieste e la dashboard
+   compare solo dopo la verifica `aal2`.
 4. Ricarica `/`: la sessione deve essere ripristinata e verificata prima dei dati.
 5. Apri `/accesso` con sessione attiva: torna a `/` senza redirect loop.
 6. Premi Esci: il contenuto scompare e si torna al modulo. Ricarica per controllare
@@ -128,8 +136,101 @@ token già emesso può restare valido fino alla propria scadenza.
 7. Per scadenza, errori di rete e revoca usa inizialmente i test simulati; non
    modificare le impostazioni globali o revocare sessioni di produzione del bot.
 
-Il login reale non è stato verificato durante l'implementazione: non sono state
-usate credenziali reali né eseguite richieste al progetto Supabase.
+Il login email/password è stato verificato manualmente prima di queste modifiche.
+Il nuovo flusso MFA non è stato provato sul progetto reale: i test automatici
+usano solo mock e dati sintetici, senza richieste al progetto Supabase.
+
+## Attivazione e verifica di Authenticator
+
+L’attivazione MFA può revocare le altre sessioni dello stesso account. Il vincolo
+sull’UUID serve a evitare l’attivazione accidentale sull’utente del bot; non può
+verificare che un valore configurato manualmente sia davvero distinto. Se oggi
+usi le credenziali del bot anche sul web, fermati e predisponi prima l’identità web
+separata. L’app non attiva fattori automaticamente e non rimuove fattori esistenti.
+
+Dopo email/password, se manca un TOTP verificato, scegli **Genera QR per
+Authenticator**, scansiona il QR con un’app Authenticator e inserisci il codice
+di sei cifre. Solo una conferma riuscita e una successiva verifica del nuovo
+livello `aal2` aprono la dashboard. Il QR resta soltanto in memoria e viene
+renderizzato come immagine SVG isolata; non copiarlo in log, screenshot o report.
+Codici e password vengono svuotati subito dopo l’invio, senza storage applicativo.
+
+Il QR restituito dal SDK può contenere una dichiarazione XML prima di `<svg>`.
+Il frontend valida il documento SVG e lo normalizza in un data URI codificato,
+conservando la geometria del QR e senza inserire HTML nella pagina. Sono gestiti
+SVG diretto e data URI SVG, anche con percent-encoding o base64. URL remoti,
+formati diversi da SVG e XML malformato vengono rifiutati.
+
+`enroll()` crea un fattore non verificato prima di restituire il QR: un errore
+di visualizzazione non annulla la creazione. In quel caso il modulo mostra
+subito lo stato incompleto e permette di generare un nuovo QR. Non riutilizzare
+il codice di un vecchio QR per confermare quello nuovo; ogni QR corrisponde
+al proprio fattore. La dashboard resta bloccata fino alla verifica `aal2`.
+
+Dopo Esci e un nuovo login occorre il codice del fattore verificato, senza creare
+un nuovo QR. Il refresh durante il secondo fattore non apre la dashboard. Una
+sessione già valida a `aal2` può invece essere ripristinata senza un nuovo codice:
+non è prevista una richiesta MFA a ogni refresh o un limite di età della verifica.
+Le sessioni precedenti all’attivazione, ancora `aal1`, restano bloccate.
+
+Se ricarichi durante l’attivazione, il segreto non viene recuperato dallo storage.
+Se hai già scansionato il QR puoi confermare il fattore incompleto; altrimenti
+puoi generare un nuovo QR. I fattori incompleti precedenti restano presenti e
+possono raggiungere il limite configurato sul progetto: l’amministratore deve
+rivedere e rimuovere soltanto quelli non verificati e non più usati, sull’account
+web. Nessun fattore viene eliminato automaticamente dal frontend.
+
+La verifica `aal2` protegge la navigazione, non impone MFA alle API del database.
+Prima dei dati reali occorre progettare una policy distinta per il web e il bot:
+non applicare indiscriminatamente `aal2` al ledger. Un nuovo account web ha un
+UUID diverso e non eredita l’accesso ai dati dell’utente del bot; non aggiungere
+mapping, grant o eccezioni alle RLS in questa fase.
+
+## Recupero se perdi il dispositivo
+
+Se esiste un altro TOTP già verificato, selezionalo nel modulo. Altrimenti il
+recupero è amministrativo, fuori dalla SPA: nessun bypass, chiave privilegiata
+o comando di disattivazione MFA è disponibile nel browser.
+
+1. Interrompi i tentativi e verifica l’identità del proprietario tramite un canale
+   indipendente. Conoscere soltanto la password o avere accesso alla casella email
+   non è sufficiente per autorizzare la rimozione del secondo fattore.
+2. Un amministratore autorizzato accede alla console Supabase con il proprio
+   account amministrativo protetto e identifica esattamente l’UUID web configurato,
+   confrontandolo con quello del bot. Non agire sull’account del bot.
+3. Da un ambiente amministrativo fidato, rivede i fattori dell’utente web, rimuove
+   soltanto quello perso con le funzionalità amministrative ufficiali e revoca le
+   sessioni compromesse dell’utente web. Non creare API amministrative nel frontend.
+4. Il proprietario effettua di nuovo email/password e associa un nuovo Authenticator.
+   Prima di usare la dashboard deve tornare a `aal2`. Registra l’intervento senza
+   password, codici, QR, segreti o token e verifica un nuovo login completo.
+
+Questa procedura richiede verifica umana e privilegi amministrativi; non è stata
+eseguita sul progetto reale. Non sono attivati codici di recupero sperimentali.
+
+## CSP per l’eventuale hosting HTTPS
+
+Non è stata applicata una policy al server o al browser in questa fase. Sul futuro
+reverse proxy prova prima una CSP in modalità `Content-Security-Policy-Report-Only`,
+poi applicala dopo una verifica completa di login, refresh, QR e logout. Un punto
+di partenza per la build di produzione è il seguente header; sostituisci solo
+l’host pubblico Supabase con quello effettivamente configurato:
+
+```text
+Content-Security-Policy: default-src 'none'; script-src 'self'; style-src 'self'; style-src-attr 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self' https://PROJECT.supabase.co; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'self'
+```
+
+`data:` serve per QR e favicon SVG, senza consentire script inline. La deroga
+`style-src-attr` conserva i colori inline della legenda esistente; non autorizza
+script. La build attuale non usa Realtime: non occorre autorizzare WebSocket verso
+Supabase. Se in futuro cambia il traffico, rivedi `connect-src` senza wildcard.
+`frame-ancestors` richiede un header HTTP: una meta CSP non lo sostituisce.
+
+Non riutilizzare questa policy alla cieca su Vite dev: React Refresh usa codice
+inline, Vite inietta gli stili e HMR richiede il WebSocket locale. Tieni la policy
+di produzione sul futuro proxy della build statica; per eventuali prove dev usa
+una policy separata limitata all’origine locale. Non ampliare la CSP di produzione
+per risolvere errori del server di sviluppo. Nessun proxy o HTTPS è stato configurato.
 
 ## Dati e componenti
 
@@ -158,7 +259,7 @@ npm run test -w @finance-tracker/web
 Vitest, React Testing Library e jsdom (versione compatibile con il requisito Node
 22.12 del progetto). Supabase è simulato e le richieste fetch reali sono bloccate;
 Vitest non carica file `.env`. Sono verificati login, errore, invii duplicati,
-configurazione assente/privilegiata, ripristino, eventi Auth, scadenza, logout,
+configurazione assente/privilegiata, ripristino, eventi Auth, scadenza, logout, MFA,
 risposte obsolete e l'allowlist esatta di Vite. Queste prove non certificano
 credenziali, configurazione o autenticazione remota.
 
@@ -166,6 +267,9 @@ credenziali, configurazione o autenticazione remota.
 
 - [Supabase: login email/password](https://supabase.com/docs/reference/javascript/auth-signinwithpassword)
 - [Supabase: verifica utente](https://supabase.com/docs/reference/javascript/auth-getuser)
+- [Supabase: MFA TOTP](https://supabase.com/docs/guides/auth/auth-mfa/totp)
+- [Supabase: livello AAL](https://supabase.com/docs/reference/javascript/auth-mfa-getauthenticatorassurancelevel)
+- [Supabase: rimozione amministrativa di un fattore](https://supabase.com/docs/reference/javascript/auth-admin-deletefactor)
 - [Supabase: eventi Auth](https://supabase.com/docs/reference/javascript/auth-onauthstatechange)
 - [Supabase: logout e scope](https://supabase.com/docs/reference/javascript/auth-signout)
 - [Supabase: client e persistenza](https://supabase.com/docs/reference/javascript/initializing)

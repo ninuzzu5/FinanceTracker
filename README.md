@@ -44,7 +44,7 @@ Per la dashboard, in un altro terminale:
 npm run web:dev
 ```
 
-Configura prima le due variabili pubbliche in `apps/web/.env.local` seguendo la
+Configura prima le variabili pubbliche in `apps/web/.env.local` seguendo la
 [guida web](apps/web/README.md), senza copiare il file privato del bot.
 Apri `http://127.0.0.1:5173/`: `/accesso` richiede un account Supabase autorizzato.
 

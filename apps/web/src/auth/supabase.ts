@@ -1,6 +1,6 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
-import { readPublicConfig } from "./config";
+import { readPublicConfig, readWebUserId } from "./config";
 
 let client: SupabaseClient | undefined;
 export function getBrowserSupabase(): SupabaseClient | null {
@@ -8,7 +8,7 @@ export function getBrowserSupabase(): SupabaseClient | null {
     VITE_SUPABASE_URL: import.meta.env.VITE_SUPABASE_URL,
     VITE_SUPABASE_PUBLISHABLE_KEY: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
   });
-  if (!config) return null;
+  if (!config || !readWebUserId(import.meta.env.VITE_SUPABASE_WEB_USER_ID)) return null;
   client ??= createClient(config.url, config.key, {
     auth: {
       persistSession: true,

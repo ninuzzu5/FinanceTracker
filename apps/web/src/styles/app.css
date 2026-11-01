@@ -10,6 +10,10 @@ button:disabled { cursor: not-allowed; }
 button:disabled, input:disabled { opacity: .6; }
 .logout-button { border: 0; background: transparent; font: inherit; }
 .auth-state { display: grid; gap: 24px; text-align: center; }
+.mfa-panel { display: grid; gap: 18px; }
+.mfa-panel p { font-size: var(--text-caption); color: var(--color-muted); }
+.mfa-panel form { display: grid; gap: 14px; }
+.mfa-qr { display: block; width: 220px; max-width: 100%; height: auto; margin: 0 auto; padding: 12px; background: #fff; border-radius: 12px; }
 button, a { touch-action: manipulation; }
 :focus-visible { outline: 2px solid var(--color-focus); outline-offset: 5px; }
 button, a, input { transition: background-color var(--motion-duration), border-color var(--motion-duration), color var(--motion-duration), box-shadow var(--motion-duration); }

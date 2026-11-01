@@ -31,7 +31,7 @@ con `search_path` vuoto. Le letture usano `SECURITY INVOKER` e RLS.
 La chiave pubblica non sostituisce Auth o le policy. Non usare secret/service role
 nel flusso ordinario. Non inviare al browser credenziali Auth del bot, password,
 access/refresh token, sessioni o chiavi privilegiate del bot. Il frontend espone
-solo URL e chiave pubblica Supabase, usa Auth e conserva ancora fixture finanziarie
+solo URL, chiave pubblica e UUID dell’account web dedicato, richiede Auth a `aal2` e conserva ancora fixture finanziarie
 locali. La sessione web usa la persistenza ufficiale in localStorage: vedi
 [configurazione e limiti di sicurezza](apps/web/README.md#sessione-verifica-e-logout).
 

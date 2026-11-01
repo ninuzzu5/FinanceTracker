@@ -25,7 +25,7 @@ export function Access() {
     setPending(true);
     setNotice("");
     const request = signIn(email.value, password.value);
-    // Keep the password out of React state/storage and clear the DOM immediately.
+    // Svuota subito la password, senza conservarla nello stato o nello storage.
     password.value = "";
     setVisible(false);
     try {
@@ -36,7 +36,7 @@ export function Access() {
       setPending(false);
     }
   };
-  const message = !configured ? "Accesso non configurato. Imposta URL e chiave pubblica Supabase per la dashboard."
+  const message = !configured ? "Accesso non configurato. Imposta URL, chiave pubblica e identificativo dell’account web dedicato."
     : notice || (state.status === "anonymous" ? state.message : "");
   return <main className="access-page">
     <section className="access-panel glass" aria-labelledby="access-title">

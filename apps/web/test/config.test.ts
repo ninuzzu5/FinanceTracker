@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { readPublicConfig } from "../src/auth/config";
+import { readPublicConfig, readWebUserId } from "../src/auth/config";
 
 const config = (key = "sb_publishable_synthetic", url = "https://project.example.invalid") => ({
   VITE_SUPABASE_URL: url, VITE_SUPABASE_PUBLISHABLE_KEY: key,
@@ -7,6 +7,10 @@ const config = (key = "sb_publishable_synthetic", url = "https://project.example
 const jwt = (role: string) => `synthetic.${btoa(JSON.stringify({ role }))}.signature`;
 
 describe("public Supabase configuration", () => {
+  it("richiede un identificativo UUID per l’account web dedicato", () => {
+    expect(readWebUserId("00000000-0000-4000-8000-000000000001")).toBe("00000000-0000-4000-8000-000000000001");
+    for (const value of [undefined, "", "person@example.invalid", "not-an-id"]) expect(readWebUserId(value)).toBeNull();
+  });
   it("accepts only the two public variables and publishable or legacy anon keys", () => {
     expect(readPublicConfig(config())).toEqual({ url: "https://project.example.invalid", key: "sb_publishable_synthetic" });
     expect(readPublicConfig(config(jwt("anon")))?.key).toBe(jwt("anon"));
