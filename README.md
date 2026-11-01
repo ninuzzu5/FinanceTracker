@@ -3,7 +3,8 @@
 Uso FinanceTracker per registrare entrate, uscite e trasferimenti da Telegram.
 Il bot interpreta il testo con regole TypeScript, mostra un riepilogo e salva
 solo dopo la conferma. Supabase/PostgreSQL conserva i dati contabili.
-La dashboard web mostra per ora dati di esempio: non legge il database e non autentica utenti.
+La dashboard web usa Supabase Auth per l'accesso e mostra ancora dati di esempio:
+non legge le tabelle finanziarie.
 
 ## Uso del bot
 
@@ -43,8 +44,9 @@ Per la dashboard, in un altro terminale:
 npm run web:dev
 ```
 
-Apri `http://127.0.0.1:5173/`; `/accesso` è soltanto una schermata grafica.
-Per il web non servono credenziali. Vedi la [guida web](apps/web/README.md).
+Configura prima le due variabili pubbliche in `apps/web/.env.local` seguendo la
+[guida web](apps/web/README.md), senza copiare il file privato del bot.
+Apri `http://127.0.0.1:5173/`: `/accesso` richiede un account Supabase autorizzato.
 
 ## Variabili d’ambiente del bot
 

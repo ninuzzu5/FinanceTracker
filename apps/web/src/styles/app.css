@@ -7,6 +7,9 @@ button, input { font: inherit; }
 button, a, input { -webkit-tap-highlight-color: transparent; }
 button { cursor: pointer; color: inherit; }
 button:disabled { cursor: not-allowed; }
+button:disabled, input:disabled { opacity: .6; }
+.logout-button { border: 0; background: transparent; font: inherit; }
+.auth-state { display: grid; gap: 24px; text-align: center; }
 button, a { touch-action: manipulation; }
 :focus-visible { outline: 2px solid var(--color-focus); outline-offset: 5px; }
 button, a, input { transition: background-color var(--motion-duration), border-color var(--motion-duration), color var(--motion-duration), box-shadow var(--motion-duration); }
@@ -42,6 +45,8 @@ svg { flex-shrink: 0; }
 .access-link { display: flex; gap: 10px; align-items: center; padding: 12px; font-size: 11px; color: var(--color-muted); border-radius: var(--radius-control); }
 .access-link:hover { color: var(--color-accent); background: var(--color-surface-raised); }
 .access-link > svg:last-child { margin-left: auto; }
+.access-link.logout-button { width: 100%; }
+.access-link.logout-button > svg { margin-left: 0; }
 .sidebar-footer { display: flex; align-items: center; gap: 7px; border-top: 1px solid var(--color-divider); padding: 20px 12px 0; margin-top: 14px; color: var(--color-subtle); font-size: 10px; }
 .sidebar-footer > span:last-child { margin-left: auto; }
 .status-dot { height: 5px; width: 5px; border-radius: 50%; background: var(--color-accent); }
@@ -145,9 +150,9 @@ td.amount-transfer { color: #a3bac8; }
 .amount-cell > svg { vertical-align: middle; margin-right: 7px; opacity: .5; }
 .transfer-accounts { display: inline-flex; align-items: center; gap: 5px; }
 .dashboard-footer { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 16px; padding: 26px 2px 8px; color: var(--color-subtle); font-size: 11px; }
-.dashboard-footer span, .dashboard-footer a { display: flex; gap: 6px; align-items: center; }
-.dashboard-footer a { color: #a4bfb2; }
-.dashboard-footer a:hover { color: var(--color-accent); }
+.dashboard-footer span, .dashboard-footer a, .dashboard-footer button { display: flex; gap: 6px; align-items: center; }
+.dashboard-footer a, .dashboard-footer button { color: #a4bfb2; }
+.dashboard-footer a:hover, .dashboard-footer button:hover { color: var(--color-accent); }
 .mobile-bar, .menu-overlay { display: none; }
 @media (hover: hover) and (prefers-reduced-motion: no-preference) {
   .summary-card:hover { transform: translateY(-2px); border-color: var(--color-border-highlight); box-shadow: var(--shadow-hover); }

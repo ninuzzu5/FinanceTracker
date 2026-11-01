@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from "react";
-import { ArrowDownLeft, ArrowRight, ArrowUpRight, CalendarDays, ChartNoAxesCombined, ChevronRight, Coins, FlaskConical, LayoutDashboard, ListFilter, LogIn, Menu, ShieldCheck, Wallet, X } from "lucide-react";
+import { ArrowDownLeft, ArrowUpRight, CalendarDays, ChartNoAxesCombined, Coins, FlaskConical, LayoutDashboard, ListFilter, LogOut, Menu, ShieldCheck, Wallet, X } from "lucide-react";
 import { accountLabels } from "@finance-tracker/domain";
 import { Brand } from "../../components/Brand";
 import { demo, demoAccounts } from "../../data/demo";
 import { CategoryChart, SpendingChart } from "./Charts";
 import { Movements } from "./Movements";
+import { useAuth } from "../../auth/AuthProvider";
 
 const navigation = [
   { id: "dashboard", label: "Panoramica", Icon: LayoutDashboard },
@@ -19,6 +20,7 @@ function MiniChart({ bars = false, muted = false }: { bars?: boolean; muted?: bo
 }
 
 export function Dashboard() {
+  const { signOut } = useAuth();
   const [menuOpen, setMenuOpen] = useState(false);
   const menuButton = useRef<HTMLButtonElement>(null);
   const [active, setActive] = useState("dashboard");
@@ -42,7 +44,7 @@ export function Dashboard() {
       <span className="sidebar-section-label">Navigazione</span>
       <nav>{navigation.map(({ id, label, Icon }) => id === "budget" ? <div className="nav-unavailable" key={id}><button type="button" disabled title="Budget non disponibile" aria-describedby="budget-hint"><Icon size={20} />{label}</button><span id="budget-hint" className="sr-only">Budget non disponibile.</span></div> : <a className={`nav-link${active === id ? " active" : ""}`} href={`#${id}`} key={id} aria-current={active === id ? "location" : undefined} onClick={() => { setActive(id); setMenuOpen(false); }}><Icon size={20} aria-hidden="true" />{label}</a>)}</nav>
       <div className="sidebar-bottom">
-        <a className="access-link" href="/accesso"><LogIn size={18} aria-hidden="true" />Accesso<ArrowRight size={15} aria-hidden="true" /></a>
+        <button className="access-link logout-button" type="button" onClick={() => { void signOut(); }}><LogOut size={18} aria-hidden="true" />Esci</button>
         <div className="sidebar-footer">FinanceTracker</div>
       </div>
     </aside>
@@ -59,7 +61,7 @@ export function Dashboard() {
         <section className="glass accounts-panel" id="conti" aria-labelledby="accounts-title"><div className="panel-heading"><h2 id="accounts-title">Conti</h2><span className="quiet-label">3 conti</span></div><div className="accounts-list">{demoAccounts.map(account => <div className="account-row" key={account.id}><span className={`account-logo account-${account.id}`} aria-hidden="true">{account.monogram || <Wallet size={23} />}</span><div className="account-info"><h3>{accountLabels[account.id]}</h3><p>{account.description}</p></div><strong>{account.balance}</strong></div>)}</div></section>
       </div>
       <Movements />
-      <footer className="dashboard-footer"><span>FinanceTracker</span><a href="/accesso">Accesso<ChevronRight size={14} aria-hidden="true" /></a></footer>
+      <footer className="dashboard-footer"><span>FinanceTracker</span><button className="logout-button" type="button" onClick={() => { void signOut(); }}>Esci<LogOut size={14} aria-hidden="true" /></button></footer>
     </main>
   </div>;
 }

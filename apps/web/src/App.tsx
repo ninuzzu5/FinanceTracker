@@ -1,18 +1,30 @@
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { Dashboard } from "./features/dashboard/Dashboard";
 import { Access } from "./features/access/Access";
+import { Brand } from "./components/Brand";
+import { useAuth } from "./auth/AuthProvider";
 
-// I due percorsi sono indipendenti: non esiste uno stato di autenticazione.
 export function App() {
-  const [path, setPath] = useState(window.location.pathname);
+  const { state, signOut } = useAuth();
+  const authenticated = state.status === "authenticated";
   useEffect(() => {
-    const update = () => setPath(window.location.pathname);
-    window.addEventListener("popstate", update);
-    return () => window.removeEventListener("popstate", update);
-  }, []);
-  const access = path === "/accesso";
-  useEffect(() => {
-    document.title = `FinanceTracker · ${access ? "Accesso" : "Panoramica"}`;
-  }, [access]);
-  return access ? <Access /> : <Dashboard />;
+    const syncLocation = () => {
+      if (state.status === "loading") return;
+      const target = authenticated ? "/" : "/accesso";
+      if (window.location.pathname !== target) window.history.replaceState(null, "", target);
+      document.title = `FinanceTracker · ${authenticated ? "Panoramica" : "Accesso"}`;
+    };
+    syncLocation();
+    window.addEventListener("popstate", syncLocation);
+    return () => window.removeEventListener("popstate", syncLocation);
+  }, [authenticated, state.status]);
+
+  if (state.status === "loading" || state.status === "logout-error") {
+    return <main className="access-page"><section className="access-panel glass auth-state" aria-live="polite" aria-busy={state.status === "loading"}>
+      <Brand large />
+      <p role="status">{state.status === "loading" ? "Verifica della sessione…" : "Uscita non riuscita. Controlla la connessione e riprova."}</p>
+      {state.status === "logout-error" && <button className="primary-button" onClick={() => { void signOut(); }}>Riprova a uscire</button>}
+    </section></main>;
+  }
+  return state.status === "authenticated" ? <Dashboard key={state.user.id} /> : <Access />;
 }

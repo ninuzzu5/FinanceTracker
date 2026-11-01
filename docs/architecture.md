@@ -11,7 +11,7 @@ Per avvio e uso vedi la [guida Telegram](bot-guide.md); per lo schema la
 | --- | --- |
 | `packages/domain` | Tipi, conti e alias, categorie, importi, date, parser e classificazione a regole |
 | `apps/bot` | Autorizzazione Telegram, conversazioni, viste, trasporto e repository Supabase |
-| `apps/web` | React/TypeScript/Vite con dati sintetici locali e accesso soltanto grafico |
+| `apps/web` | React/TypeScript/Vite con Supabase Auth e dati finanziari sintetici locali |
 | `supabase` | Migrazioni, preflight e prove SQL isolate |
 
 Il dominio non usa AI o un modello addestrato. Le regole privilegiano espressioni
@@ -127,8 +127,11 @@ per grandi ledger; prima di aggiungerli occorre misurare le query.
 ## Frontend e verifiche
 
 La dashboard usa solo aggregati statici in `apps/web/src/data/demo.ts` e tipi del
-dominio. Non legge Supabase, non crea sessioni e non calcola saldi. I trasferimenti
-sono esclusi dai totali di entrate/uscite. I percorsi `/` e `/accesso` sono indipendenti.
+dominio. Usa Supabase Auth per login email/password, ripristino e logout locale,
+senza leggere tabelle finanziarie o calcolare saldi. I trasferimenti sono esclusi
+dai totali di entrate/uscite. `/` richiede una sessione verificata; `/accesso` mostra
+il modulo agli utenti non autenticati. Configurazione pubblica e limiti della
+protezione frontend sono descritti nella [guida web](../apps/web/README.md).
 I dati temporanei andranno sostituiti con la futura integrazione, senza un ledger parallelo.
 
 I test applicativi simulano i servizi. Le prove SQL locali mantengono RLS, trigger

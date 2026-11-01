@@ -1,28 +1,57 @@
-import { useState } from "react";
-import { ArrowLeft, ArrowRight, Eye, EyeOff, LockKeyhole, Mail, ShieldCheck } from "lucide-react";
+import { useRef, useState, type FormEvent } from "react";
+import { ArrowRight, Eye, EyeOff, LockKeyhole, Mail, ShieldCheck } from "lucide-react";
 import { Brand } from "../../components/Brand";
+import { useAuth } from "../../auth/AuthProvider";
 
 export function Access() {
+  const { state, signIn } = useAuth();
   const [visible, setVisible] = useState(false);
   const [notice, setNotice] = useState("");
+  const [pending, setPending] = useState(false);
+  const submitting = useRef(false);
+  const configured = state.status !== "configuration-error";
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (submitting.current || !configured) return;
+    const form = event.currentTarget;
+    const email = form.elements.namedItem("email") as HTMLInputElement;
+    const password = form.elements.namedItem("password") as HTMLInputElement;
+    email.value = email.value.trim();
+    if (!email.value || !email.validity.valid || !password.value) {
+      setNotice("Inserisci un indirizzo email valido e la password.");
+      return;
+    }
+    submitting.current = true;
+    setPending(true);
+    setNotice("");
+    const request = signIn(email.value, password.value);
+    // Keep the password out of React state/storage and clear the DOM immediately.
+    password.value = "";
+    setVisible(false);
+    try {
+      const error = await request;
+      if (error) setNotice(error);
+    } finally {
+      submitting.current = false;
+      setPending(false);
+    }
+  };
+  const message = !configured ? "Accesso non configurato. Imposta URL e chiave pubblica Supabase per la dashboard."
+    : notice || (state.status === "anonymous" ? state.message : "");
   return <main className="access-page">
-    <a className="preview-back" href="/"><ArrowLeft size={16} /> Torna alla panoramica</a>
     <section className="access-panel glass" aria-labelledby="access-title">
       <Brand large />
       <h1 id="access-title" className="access-tagline">Accesso</h1>
-      <form noValidate onSubmit={event => {
-        event.preventDefault();
-        setNotice("L’accesso non è disponibile.");
-      }}>
+      <form noValidate onSubmit={event => { void submit(event); }} aria-busy={pending}>
         <label htmlFor="email">Email</label>
-        <div className="input-wrap"><Mail size={20} aria-hidden="true" /><input id="email" name="email" type="email" placeholder="nome@esempio.it" autoComplete="off" required /></div>
+        <div className="input-wrap"><Mail size={20} aria-hidden="true" /><input id="email" name="email" type="email" placeholder="nome@esempio.it" autoComplete="username" required disabled={pending || !configured} /></div>
         <label htmlFor="password">Password</label>
-        <div className="input-wrap"><LockKeyhole size={20} aria-hidden="true" /><input id="password" name="password" type={visible ? "text" : "password"} placeholder="Inserisci la tua password" autoComplete="off" required /><button className="icon-button" type="button" aria-label={visible ? "Nascondi password" : "Mostra password"} aria-pressed={visible} onClick={() => setVisible(!visible)}>{visible ? <EyeOff size={20} /> : <Eye size={20} />}</button></div>
-        <div className="access-options"><button type="button" className="text-button" onClick={() => setNotice("Il recupero della password non è disponibile.")}>Password dimenticata?</button></div>
-        <button className="primary-button" type="submit">Accedi <ArrowRight size={21} aria-hidden="true" /></button>
-        <p className="access-notice" role="status">{notice || "Accesso non disponibile. Non inserire credenziali reali."}</p>
+        <div className="input-wrap"><LockKeyhole size={20} aria-hidden="true" /><input id="password" name="password" type={visible ? "text" : "password"} placeholder="Inserisci la tua password" autoComplete="current-password" required disabled={pending || !configured} /><button className="icon-button" type="button" aria-label={visible ? "Nascondi password" : "Mostra password"} aria-pressed={visible} disabled={pending || !configured} onClick={() => setVisible(!visible)}>{visible ? <EyeOff size={20} /> : <Eye size={20} />}</button></div>
+        <div className="access-options"><button type="button" className="text-button" disabled title="Recupero password non ancora disponibile">Password dimenticata? Non disponibile</button></div>
+        <button className="primary-button" type="submit" disabled={pending || !configured}>{pending ? "Accesso in corso…" : "Accedi"} <ArrowRight size={21} aria-hidden="true" /></button>
+        <p className="access-notice" role="status">{message || "Accedi con il tuo account autorizzato."}</p>
       </form>
-      <div className="access-footer"><ShieldCheck size={23} aria-hidden="true" /><span>I dati inseriti non vengono inviati né salvati.</span></div>
+      <div className="access-footer"><ShieldCheck size={23} aria-hidden="true" /><span>Autenticazione tramite Supabase. La dashboard mostra ancora dati di esempio.</span></div>
     </section>
   </main>;
 }

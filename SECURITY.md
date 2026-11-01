@@ -30,8 +30,10 @@ con `search_path` vuoto. Le letture usano `SECURITY INVOKER` e RLS.
 
 La chiave pubblica non sostituisce Auth o le policy. Non usare secret/service role
 nel flusso ordinario. Non inviare al browser credenziali Auth del bot, password,
-access/refresh token, sessioni o chiavi privilegiate. Il frontend attuale usa solo
-fixture locali e non espone configurazioni Supabase.
+access/refresh token, sessioni o chiavi privilegiate del bot. Il frontend espone
+solo URL e chiave pubblica Supabase, usa Auth e conserva ancora fixture finanziarie
+locali. La sessione web usa la persistenza ufficiale in localStorage: vedi
+[configurazione e limiti di sicurezza](apps/web/README.md#sessione-verifica-e-logout).
 
 Gli endpoint remoti richiedono HTTPS senza userinfo. HTTP è ammesso solo per
 `localhost`, `127.0.0.1` e `[::1]` letterali, con porta opzionale. Il validatore
