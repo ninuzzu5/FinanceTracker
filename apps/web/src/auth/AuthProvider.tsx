@@ -7,7 +7,7 @@ import { normalizeMfaQr } from "./mfa-qr";
 type AuthState =
   | { status: "loading" }
   | { status: "anonymous"; message?: string }
-  | { status: "authenticated"; user: User }
+  | { status: "authenticated"; user: User; client: SupabaseClient; signal: AbortSignal }
   | { status: "mfa"; user: User; mode: "enroll" | "challenge"; factors: { id: string; name: string }[]; factorId: string | null; qrCode?: string }
   | { status: "verification-error" }
   | { status: "configuration-error" }
@@ -49,8 +49,11 @@ export function AuthProvider({ children, client = getBrowserSupabase(), webUserI
     let revision = 0;
     let verificationTimer: ReturnType<typeof setTimeout> | undefined;
     let expiryTimer: ReturnType<typeof setTimeout> | undefined;
+    let dashboardAccess: AbortController | undefined;
     const cancel = () => {
       revision++;
+      dashboardAccess?.abort();
+      dashboardAccess = undefined;
       clearTimeout(verificationTimer);
       clearTimeout(expiryTimer);
     };
@@ -101,7 +104,8 @@ export function AuthProvider({ children, client = getBrowserSupabase(), webUserI
             const verified = factors.data.totp.filter(factor => factor.status === "verified");
             if (assurance.data.currentLevel === "aal2" && verified.length > 0) {
               enrollment.current = null;
-              setState({ status: "authenticated", user: data.user });
+              dashboardAccess = new AbortController();
+              setState({ status: "authenticated", user: data.user, client, signal: dashboardAccess.signal });
             } else {
               const saved = enrollment.current;
               const pending = factors.data.all.find(factor => factor.factor_type === "totp" && factor.status === "unverified");

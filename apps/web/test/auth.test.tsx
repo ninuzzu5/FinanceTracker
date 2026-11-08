@@ -33,7 +33,11 @@ function mockClient(initial: Session | null = null) {
       return { data: { subscription: { unsubscribe: () => { unsubscribe(); listeners.delete(listener); } } } };
     }),
   };
-  return { auth, client: { auth } as unknown as SupabaseClient, unsubscribe,
+  const readRpc = vi.fn((_name: string, _args: Record<string, unknown>, _signal: AbortSignal): unknown =>
+    ({ data: [], count: 0, status: 200, error: null }));
+  const rpc = vi.fn((name: string, args: Record<string, unknown>, _options: { get: boolean; count?: string }) =>
+    ({ abortSignal: (signal: AbortSignal) => Promise.resolve(readRpc(name, args, signal)) }));
+  return { auth, rpc, readRpc, client: { auth, rpc } as unknown as SupabaseClient, unsubscribe,
     emit: (event: AuthChangeEvent, value: Session | null) => act(() => { for (const listener of listeners) listener(event, value); }),
   };
 }
@@ -54,13 +58,14 @@ describe("web authentication", () => {
     mount(mock.client);
     expect(dashboard()).toBeNull();
     await screen.findByRole("button", { name: "Accedi" });
-    expect(window.location.pathname).toBe("/accesso");
+    await waitFor(() => expect(window.location.pathname).toBe("/accesso"));
     expect(dashboard()).toBeNull();
     expect(mock.auth.getUser).not.toHaveBeenCalled();
+    expect(mock.rpc).not.toHaveBeenCalled();
     expect((screen.getByRole("button", { name: /Password dimenticata/ }) as HTMLButtonElement).disabled).toBe(true);
   });
 
-  it("signs in, verifies the user and redirects to the demo dashboard", async () => {
+  it("apre la dashboard vuota solo dopo avere verificato l’identità e aal2", async () => {
     const mock = mockClient();
     mount(mock.client);
     fireEvent.submit(await loginForm());
@@ -68,7 +73,11 @@ describe("web authentication", () => {
     expect(mock.auth.signInWithPassword).toHaveBeenCalledWith({ email: "person@example.invalid", password: "synthetic-password" });
     expect(mock.auth.getUser).toHaveBeenCalledWith("synthetic-token");
     expect(window.location.pathname).toBe("/");
-    expect(screen.getByText("Dati di esempio")).toBeTruthy();
+    await screen.findByText("Nessun dato disponibile per il periodo.");
+    expect(mock.rpc).toHaveBeenCalledWith("get_dashboard_balances", { p_as_of: expect.any(String) }, { get: true, count: "exact" });
+    expect(screen.queryByRole("heading", { name: "Saldo complessivo" })).toBeNull();
+    expect(screen.queryByRole("table")).toBeNull();
+    expect(screen.queryByText("Dati di esempio")).toBeNull();
     expect(fetch).not.toHaveBeenCalled();
   });
 
@@ -130,11 +139,11 @@ describe("web authentication", () => {
     await screen.findByRole("heading", { name: "Panoramica" });
     fireEvent.click(screen.getAllByRole("button", { name: "Esci" })[0]);
     expect(dashboard()).toBeNull();
-    expect(screen.queryByText("Patrimonio totale")).toBeNull();
+    expect(screen.queryByText("Saldo complessivo")).toBeNull();
     expect(mock.auth.signOut).toHaveBeenCalledWith({ scope: "local" });
     await act(async () => { request.resolve({ error: null }); });
     await screen.findByRole("button", { name: "Accedi" });
-    expect(window.location.pathname).toBe("/accesso");
+    await waitFor(() => expect(window.location.pathname).toBe("/accesso"));
   });
 
   it("keeps content hidden and allows retry when signOut fails", async () => {
@@ -244,6 +253,7 @@ describe("MFA TOTP", () => {
     await screen.findByRole("heading", { name: "Verifica a due fattori" });
     expect(dashboard()).toBeNull();
     expect(mock.auth.mfa.enroll).not.toHaveBeenCalled();
+    expect(mock.rpc).not.toHaveBeenCalled();
   });
 
   it("richiede il secondo fattore dopo email e password", async () => {
@@ -537,4 +547,153 @@ it("mostra subito lo stato incompleto se il fattore è creato ma il QR è malfor
   expect(mock.auth.mfa.enroll).toHaveBeenCalledTimes(1);
   expect(screen.queryByRole("img", { name: "QR per configurare Authenticator" })).toBeNull();
   expect(dashboard()).toBeNull();
+});
+
+describe("dati della dashboard", () => {
+  const bank = "00000000-0000-4000-8000-000000000010";
+  const cash = "00000000-0000-4000-8000-000000000011";
+  const id = (index: number) => `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`;
+  const ok = (data: unknown[]) => ({ data, count: data.length, status: 200, error: null });
+  const balance = (date: unknown) => ({ account_id: bank, account_name: "Conto di verifica",
+    is_active: true, as_of_date: date, status: "configured", balance: "-20.12", currency: "EUR" });
+  const expenses = (date: unknown) => ({ id: id(4), transaction_date: date, type: "expense", amount: "0.10",
+    category: "food", from_account_id: bank, to_account_id: null, voided: false, ledger_version: 1 });
+
+  it("usa tutti i movimenti per i totali e distingue trasferimenti e annullamenti", async () => {
+    const mock = mockClient(session());
+    mock.readRpc.mockImplementation((name, args) => {
+      if (name === "get_dashboard_balances") return ok([balance(args.p_as_of),
+        { ...balance(args.p_as_of), account_id: cash, account_name: "Contanti di verifica", balance: "0.01", is_active: false }]);
+      const first = expenses(args.p_from);
+      if (!args.p_before_id) return ok([first,
+        { ...first, id: id(3), type: "transfer", category: null, to_account_id: cash, amount: "25.00" },
+        { ...first, id: id(2), voided: true, amount: "42.90" }]);
+      if (args.p_before_id === id(2)) return ok([{ ...first, id: id(1), amount: "0.20" },
+        { ...first, id: id(0), type: "income", amount: "1.05", category: "salary", from_account_id: null, to_account_id: bank }]);
+      return ok([]);
+    });
+    mount(mock.client);
+    await screen.findByRole("table");
+    const summary = screen.getByRole("region", { name: "Riepilogo finanziario" });
+    expect(summary.textContent).toContain("-20,11");
+    expect(summary.textContent).toMatch(/Uscite mensili0,30/);
+    expect(summary.textContent).toMatch(/Entrate mensili1,05/);
+    expect(screen.getAllByRole("row")).toHaveLength(6);
+    expect(screen.getByText("Annullato")).toBeTruthy();
+    expect(screen.getByText("Trasferimento")).toBeTruthy();
+    expect(screen.getByText("Conto inattivo")).toBeTruthy();
+    expect(screen.getByRole("img", { name: /Andamento delle spese/ })).toBeTruthy();
+    expect(mock.rpc).toHaveBeenCalledWith("get_dashboard_movements", {
+      p_from: expect.any(String), p_to: expect.any(String), p_limit: 50,
+      p_before_date: expect.any(String), p_before_id: id(2),
+    }, { get: true });
+    expect(localStorage.length).toBe(0);
+  });
+
+  it("nasconde i dati parziali quando una pagina fallisce e permette di riprovare", async () => {
+    const mock = mockClient(session());
+    let failing = true;
+    mock.readRpc.mockImplementation((name, args) => {
+      if (name === "get_dashboard_balances") return ok([balance(args.p_as_of)]);
+      if (!args.p_before_id) return ok([expenses(args.p_from)]);
+      return failing ? { data: null, error: { code: "XX000", message: "dettagli riservati" }, status: 500 } : ok([]);
+    });
+    mount(mock.client);
+    expect((await screen.findByRole("alert")).textContent).toBe("Impossibile caricare i dati del periodo.");
+    expect(screen.queryByRole("table")).toBeNull();
+    expect(screen.queryByText("Conto di verifica")).toBeNull();
+    expect(screen.queryByText(/dettagli riservati/)).toBeNull();
+    failing = false;
+    fireEvent.click(screen.getByRole("button", { name: "Riprova" }));
+    await screen.findByRole("table");
+  });
+
+  it.each([401, 403])("tratta HTTP %i come sessione o autorizzazione da ricontrollare", async (status) => {
+    const mock = mockClient(session());
+    mock.readRpc.mockReturnValue({ data: null, error: { code: "PGRST301" }, status });
+    mount(mock.client);
+    expect((await screen.findByRole("alert")).textContent).toMatch(/sessione scaduta/);
+    expect(screen.queryByRole("table")).toBeNull();
+    expect(screen.getByRole("button", { name: "Verifica la sessione" })).toBeTruthy();
+  });
+
+  it("interrompe le richieste al logout e scarta le risposte della sessione precedente", async () => {
+    const mock = mockClient(session());
+    const pending = deferred<unknown>();
+    mock.readRpc.mockReturnValue(pending.promise);
+    mount(mock.client);
+    await screen.findByText("Caricamento dei dati in corso…");
+    await waitFor(() => expect(mock.readRpc).toHaveBeenCalled());
+    const signals = mock.readRpc.mock.calls.map(call => call[2]);
+    fireEvent.click(screen.getAllByRole("button", { name: "Esci" })[0]);
+    expect(signals.every(signal => signal.aborted)).toBe(true);
+    await screen.findByRole("button", { name: "Accedi" });
+    mock.readRpc.mockReturnValue(ok([]));
+    fireEvent.submit(await loginForm());
+    await screen.findByText("Nessun dato disponibile per il periodo.");
+    await act(async () => { pending.resolve(ok([balance("2026-01-01")])); });
+    expect(screen.queryByText("Conto di verifica")).toBeNull();
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("rimuove i dati già caricati al cambio di account", async () => {
+    const mock = mockClient(session());
+    mock.readRpc.mockImplementation((name, args) => name === "get_dashboard_balances"
+      ? ok([balance(args.p_as_of)]) : ok([]));
+    mount(mock.client);
+    await screen.findByText("Conto di verifica");
+    const calls = mock.rpc.mock.calls.length;
+    const otherUser = { ...user, id: id(99) };
+    mock.auth.getUser.mockResolvedValue({ data: { user: otherUser }, error: null });
+    mock.emit("SIGNED_IN", { ...session(), user: otherUser });
+    expect(screen.queryByText("Conto di verifica")).toBeNull();
+    await screen.findByText(/Account non abilitato/);
+    expect(mock.rpc).toHaveBeenCalledTimes(calls);
+  });
+
+  it("mostra altri movimenti senza alterare i totali mensili", async () => {
+    const mock = mockClient(session());
+    mock.readRpc.mockImplementation((name, args) => {
+      if (name === "get_dashboard_balances" || args.p_before_id) return ok([]);
+      return ok(Array.from({ length: 26 }, (_, index) => ({ ...expenses(args.p_from), id: id(26 - index) })));
+    });
+    mount(mock.client);
+    await screen.findByRole("table");
+    const summary = screen.getByRole("region", { name: "Riepilogo finanziario" });
+    expect(summary.textContent).toMatch(/Uscite mensili2,60/);
+    expect(screen.getAllByRole("row")).toHaveLength(26);
+    fireEvent.click(screen.getByRole("button", { name: "Mostra altri movimenti" }));
+    expect(screen.getAllByRole("row")).toHaveLength(27);
+    expect(summary.textContent).toMatch(/Uscite mensili2,60/);
+  });
+
+  it("interrompe le richieste del mese precedente quando si cambia periodo", async () => {
+    const mock = mockClient(session());
+    const pending = deferred<unknown>();
+    mock.readRpc.mockReturnValue(pending.promise);
+    mount(mock.client);
+    await screen.findByText("Caricamento dei dati in corso…");
+    await waitFor(() => expect(mock.readRpc).toHaveBeenCalled());
+    const calls = mock.readRpc.mock.calls.slice();
+    const currentAsOf = calls.find(call => call[0] === "get_dashboard_balances")?.[1].p_as_of;
+    mock.readRpc.mockReturnValue(ok([]));
+    fireEvent.click(screen.getByRole("button", { name: "Mese precedente" }));
+    await screen.findByText("Nessun dato disponibile per il periodo.");
+    expect(calls.every(call => call[2].aborted)).toBe(true);
+    const previousAsOf = mock.readRpc.mock.calls.filter(call => call[0] === "get_dashboard_balances").at(-1)?.[1].p_as_of;
+    expect(typeof previousAsOf === "string" && typeof currentAsOf === "string" && previousAsOf < currentAsOf).toBe(true);
+    await act(async () => { pending.resolve(ok([balance(currentAsOf)])); });
+    expect(screen.queryByText("Conto di verifica")).toBeNull();
+  });
+
+  it("non mostra un saldo complessivo parziale se un conto è senza apertura", async () => {
+    const mock = mockClient(session());
+    mock.readRpc.mockImplementation((name, args) => name === "get_dashboard_balances"
+      ? ok([balance(args.p_as_of), { ...balance(args.p_as_of), account_id: cash, account_name: "Contanti di verifica",
+        balance: null, status: "not_configured" }]) : ok([]));
+    mount(mock.client);
+    await screen.findByText("Saldo complessivo non disponibile");
+    expect(screen.getByText("Saldo non configurato")).toBeTruthy();
+    expect(screen.getByText("Nessun movimento nel periodo.")).toBeTruthy();
+  });
 });

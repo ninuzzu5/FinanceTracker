@@ -1,9 +1,9 @@
 # Dashboard web
 
 Frontend React 19, TypeScript e Vite 8 nel workspace `@finance-tracker/web`.
-Richiede Node.js almeno 22.12. L’accesso email/password e il secondo fattore TOTP usano Supabase Auth;
-la dashboard conserva esclusivamente i dati sintetici di `src/data/demo.ts`.
-Non vengono lette tabelle, chiamate RPC contabili o modificate transazioni.
+Richiede Node.js almeno 22.12. L’accesso email/password e il secondo fattore TOTP
+usano Supabase Auth. La dashboard legge saldi e movimenti con due RPC di sola
+lettura, tramite la sessione web verificata a livello `aal2`.
 
 ## Configurazione e avvio locale
 
@@ -45,7 +45,8 @@ npm run web:dev
 ```
 
 Apri `http://127.0.0.1:5173/`. Senza una sessione verificata viene mostrato
-`/accesso`. Dopo email/password viene richiesto Authenticator; `/` si apre soltanto a livello `aal2`, con il banner Dati di esempio.
+`/accesso`. Dopo email e password viene richiesto Authenticator. La dashboard
+carica i dati soltanto dopo la verifica di `aal2`.
 Non eseguire `npm run bot:dev` per provare il frontend.
 
 ## Controlli manuali nella console Supabase
@@ -234,15 +235,42 @@ per risolvere errori del server di sviluppo. Nessun proxy o HTTPS è stato confi
 
 ## Dati e componenti
 
-I valori restano in `src/data/demo.ts`, con tipi di conti e categorie dal dominio.
-Totali e grafici sono quelli dimostrativi esistenti, non una lettura del ledger.
-Movimenti, Analisi e Conti portano alle sezioni della pagina; Budget resta
-indisponibile. Mostra tutti espande soltanto la tabella sintetica.
+La dashboard richiede le migrazioni 010 e 011 e un’associazione privata attiva tra
+l’identità web e il proprietario del ledger. Usa `get_dashboard_balances` e
+`get_dashboard_movements` tramite GET autenticati. Il mese corrente termina alla
+data civile odierna di Roma e i mesi precedenti al loro ultimo giorno. Il saldo
+complessivo somma i saldi in EUR restituiti dal database, inclusi quelli dei
+conti inattivi. Se un saldo manca, il totale è indisponibile.
+
+I movimenti sono letti con cursore data e UUID fino alla prima pagina vuota.
+I grafici aspettano tutte le pagine del mese ed escludono trasferimenti e
+annullamenti. La tabella include entrambi e mostra i movimenti a gruppi.
+Gli importi sono elaborati in centesimi interi. I dati finanziari restano in memoria
+e le richieste pendenti vengono annullate al cambio di periodo o sessione.
+
+La firma attuale delle RPC fornisce i nomi dei conti e il tipo di movimento.
+Per mostrare anche il tipo di conto o le descrizioni occorre estendere una RPC
+di lettura o introdurne una versione con quei campi. Budget resta indisponibile
+finché il progetto non definisce come memorizzare e leggere i budget.
 
 - `src/auth`: configurazione pubblica, client browser e provider Auth.
 - `src/features/access`: modulo email/password, senza signup o recupero password.
-- `src/features/dashboard`: interfaccia esistente e comandi Esci.
+- `src/features/dashboard`: letture, riepilogo mensile, grafici, conti e movimenti.
 - `src/components` e `src/styles`: componenti e stile condivisi.
+
+## Verifica della dashboard in locale
+
+1. Usa la configurazione pubblica descritta sopra e avvia `npm run web:dev`.
+2. Apri l’indirizzo locale mostrato da Vite, accedi con l’account web dedicato
+   e inserisci il codice Authenticator. Prima di completare MFA, nel pannello
+   Rete non devono esserci richieste alle RPC della dashboard.
+3. Seleziona un mese con movimenti. Confronta il saldo alla data mostrata con il
+   saldo del bot alla stessa data. Controlla che trasferimenti e annullamenti
+   compaiano nella tabella e restino fuori da entrate, uscite e grafici.
+4. Passa a un mese senza movimenti. La tabella deve mostrare il suo stato vuoto.
+   Su un ledger senza conti né movimenti compare lo stato «Nessun dato disponibile».
+5. Esci durante un caricamento. La dashboard deve scomparire e le richieste
+   del periodo devono essere annullate.
 
 ## Test e build
 

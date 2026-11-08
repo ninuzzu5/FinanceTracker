@@ -19,6 +19,7 @@ export function getBrowserSupabase(): SupabaseClient | null {
     global: {
       fetch: (input, init) => fetch(input, {
         ...init,
+        cache: "no-store",
         signal: init?.signal
           ? AbortSignal.any([init.signal, AbortSignal.timeout(20_000)])
           : AbortSignal.timeout(20_000),

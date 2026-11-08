@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from "react";
-import { ArrowDownLeft, ArrowUpRight, CalendarDays, ChartNoAxesCombined, Coins, FlaskConical, LayoutDashboard, ListFilter, LogOut, Menu, ShieldCheck, Wallet, X } from "lucide-react";
-import { accountLabels } from "@finance-tracker/domain";
+import { ArrowDownLeft, ArrowUpRight, ChartNoAxesCombined, ChevronLeft, ChevronRight, Coins, LayoutDashboard, ListFilter, LogOut, Menu, ShieldCheck, Wallet, X } from "lucide-react";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { Brand } from "../../components/Brand";
-import { demo, demoAccounts } from "../../data/demo";
 import { CategoryChart, SpendingChart } from "./Charts";
 import { Movements } from "./Movements";
 import { useAuth } from "../../auth/AuthProvider";
+import { DashboardAccessError, loadDashboard } from "./dashboard-data";
+import { dashboardPeriod, formatDay, money, shiftMonth, statistics, todayInRome, type Period } from "./dashboard-model";
 
 const navigation = [
   { id: "dashboard", label: "Panoramica", Icon: LayoutDashboard },
@@ -15,12 +16,81 @@ const navigation = [
   { id: "conti", label: "Conti", Icon: Wallet },
 ] as const;
 
-function MiniChart({ bars = false, muted = false }: { bars?: boolean; muted?: boolean }) {
-  return <svg className={`mini-chart${muted ? " muted-chart" : ""}`} viewBox="0 0 106 52" aria-hidden="true">{bars ? <g fill="currentColor"><rect x="4" y="35" width="6" height="14" rx="1" /><rect x="17" y="23" width="6" height="26" rx="1" /><rect x="30" y="29" width="6" height="20" rx="1" /><rect x="43" y="12" width="6" height="37" rx="1" /><rect x="56" y="4" width="6" height="45" rx="1" /><rect x="69" y="19" width="6" height="30" rx="1" /><rect x="82" y="27" width="6" height="22" rx="1" /><rect x="95" y="16" width="6" height="33" rx="1" /></g> : <><path d="M2 45L15 37L25 39L36 26L47 23L59 29L70 18L82 19L93 10L102 6" fill="none" stroke="currentColor" strokeWidth="2" /><circle cx="102" cy="6" r="3" fill="currentColor" /></>}</svg>;
+type ReadAccess = { client: SupabaseClient; sessionSignal: AbortSignal };
+type LoadState = { status: "loading" | "error" | "denied" } |
+  { status: "ready"; data: Awaited<ReturnType<typeof loadDashboard>> };
+
+function DashboardData({ client, sessionSignal, period }: ReadAccess & { period: Period }) {
+  const { retry } = useAuth();
+  const [attempt, setAttempt] = useState(0);
+  const [loaded, setLoaded] = useState<{ scope: AbortSignal; state: LoadState }>();
+  const state: LoadState = loaded?.scope === sessionSignal ? loaded.state : { status: "loading" };
+
+  useEffect(() => {
+    const request = new AbortController();
+    const signal = AbortSignal.any([sessionSignal, request.signal]);
+    void loadDashboard(client, period, signal).then(data => {
+      if (!signal.aborted) setLoaded({ scope: sessionSignal, state: { status: "ready", data } });
+    }).catch((error: unknown) => {
+      if (signal.aborted) return;
+      request.abort();
+      setLoaded({ scope: sessionSignal, state: { status: error instanceof DashboardAccessError ? "denied" : "error" } });
+    });
+    return () => request.abort();
+  }, [attempt, client, period, sessionSignal]);
+
+  if (sessionSignal.aborted) return null;
+  if (state.status === "loading") return <section className="glass dashboard-state" role="status" aria-busy="true">Caricamento dei dati in corso…</section>;
+  if (state.status !== "ready") return <section className="glass dashboard-state">
+    <p role="alert">{state.status === "denied" ? "Accesso ai dati non autorizzato o sessione scaduta." : "Impossibile caricare i dati del periodo."}</p>
+    {state.status === "denied" ? <button className="text-button" onClick={retry}>Verifica la sessione</button> :
+      <button className="text-button" onClick={() => { setLoaded(undefined); setAttempt(attempt + 1); }}>Riprova</button>}
+  </section>;
+
+  const { accounts, entries } = state.data;
+  if (!accounts.length && !entries.length) return <section className="glass dashboard-state" role="status">Nessun dato disponibile per il periodo.</section>;
+
+  const totals = statistics(entries, period);
+  const hasCompleteBalance = accounts.length > 0 && accounts.every(account => account.cents !== null);
+  const balance = hasCompleteBalance ? money(accounts.reduce((sum, account) => sum + (account.cents ?? 0n), 0n)) : "—";
+  return <>
+    <section className="summary-grid" aria-label="Riepilogo finanziario">
+      <article className="glass summary-card summary-card-primary">
+        <div className="summary-icon mint-icon"><Coins size={25} aria-hidden="true" /></div>
+        <div className="summary-body"><h2>Saldo complessivo</h2><strong>{balance}</strong><p>{hasCompleteBalance ? `Al ${formatDay(period.to)}` : "Saldo complessivo non disponibile"}</p></div>
+      </article>
+      <article className="glass summary-card">
+        <div className="summary-icon mint-icon"><ArrowDownLeft size={27} aria-hidden="true" /></div>
+        <div className="summary-body"><h2>Entrate mensili</h2><strong>{money(totals.income)}</strong><p>Movimenti contabilizzati</p></div>
+      </article>
+      <article className="glass summary-card">
+        <div className="summary-icon coral-icon"><ArrowUpRight size={27} aria-hidden="true" /></div>
+        <div className="summary-body"><h2>Uscite mensili</h2><strong>{money(totals.expenses)}</strong><p>Movimenti contabilizzati</p></div>
+      </article>
+    </section>
+    <div className="detail-grid">
+      <SpendingChart totals={totals} period={period} /><CategoryChart totals={totals} period={period} />
+      <section className="glass accounts-panel" id="conti" aria-labelledby="accounts-title">
+        <div className="panel-heading"><h2 id="accounts-title">Conti</h2><span className="quiet-label">{accounts.length} {accounts.length === 1 ? "conto" : "conti"}</span></div>
+        {accounts.length === 0 ? <p className="quiet-label">Nessun conto disponibile.</p> :
+          <div className="accounts-list">{accounts.map(account => <div className="account-row" key={account.id}>
+            <span className="account-logo" aria-hidden="true"><Wallet size={23} /></span>
+            <div className="account-info"><h3>{account.name}</h3>{!account.active && <p>Conto inattivo</p>}</div>
+            <strong>{account.cents !== null ? money(account.cents) : account.status === "before_opening" ? "Prima dell’apertura" : "Saldo non configurato"}</strong>
+          </div>)}</div>}
+      </section>
+    </div>
+    <Movements accounts={accounts} entries={entries} period={period} />
+  </>;
 }
 
-export function Dashboard() {
+export function Dashboard({ client, sessionSignal }: ReadAccess) {
   const { signOut } = useAuth();
+  const today = todayInRome();
+  const currentMonth = today.slice(0, 7);
+  const [period, setPeriod] = useState(() => dashboardPeriod(currentMonth, today));
+  const month = period.from.slice(0, 7);
+  const selectMonth = (offset: number) => setPeriod(dashboardPeriod(shiftMonth(month, offset), today));
   const [menuOpen, setMenuOpen] = useState(false);
   const menuButton = useRef<HTMLButtonElement>(null);
   const [active, setActive] = useState("dashboard");
@@ -49,18 +119,15 @@ export function Dashboard() {
       </div>
     </aside>
     <main className="dashboard-main" id="contenuto" tabIndex={-1}>
-      <header className="dashboard-header"><div><p className="eyebrow">Riepilogo mensile</p><h1>Panoramica</h1></div><div className="header-tools"><span className="date-chip"><CalendarDays size={16} aria-hidden="true" />{demo.period}</span><div className="profile-avatar" aria-label="FinanceTracker">F</div></div></header>
-      <div className="demo-banner"><span><FlaskConical size={16} aria-hidden="true" /><strong>Dati di esempio</strong></span></div>
-      <section className="summary-grid" aria-label="Riepilogo finanziario">
-        <article className="glass summary-card summary-card-primary"><div className="summary-icon mint-icon"><Coins size={25} aria-hidden="true" /></div><div className="summary-body"><h2>Patrimonio totale</h2><strong>{demo.netWorth}</strong><p><span className="positive"><ArrowUpRight size={13} aria-hidden="true" />{demo.netWorthChange}</span><span>rispetto al mese scorso</span></p></div><MiniChart /></article>
-        <article className="glass summary-card"><div className="summary-icon mint-icon"><ArrowDownLeft size={27} aria-hidden="true" /></div><div className="summary-body"><h2>Entrate mensili</h2><strong>{demo.income}</strong><p><span className="positive"><ArrowUpRight size={13} aria-hidden="true" />{demo.incomeChange}</span><span>rispetto al mese scorso</span></p></div><MiniChart bars /></article>
-        <article className="glass summary-card"><div className="summary-icon coral-icon"><ArrowUpRight size={27} aria-hidden="true" /></div><div className="summary-body"><h2>Uscite mensili</h2><strong>{demo.expenses}</strong><p><span className="positive"><ArrowDownLeft size={13} aria-hidden="true" />{demo.expensesChange}</span><span>rispetto al mese scorso</span></p></div><MiniChart bars muted /></article>
-      </section>
-      <div className="detail-grid">
-        <SpendingChart /><CategoryChart />
-        <section className="glass accounts-panel" id="conti" aria-labelledby="accounts-title"><div className="panel-heading"><h2 id="accounts-title">Conti</h2><span className="quiet-label">3 conti</span></div><div className="accounts-list">{demoAccounts.map(account => <div className="account-row" key={account.id}><span className={`account-logo account-${account.id}`} aria-hidden="true">{account.monogram || <Wallet size={23} />}</span><div className="account-info"><h3>{accountLabels[account.id]}</h3><p>{account.description}</p></div><strong>{account.balance}</strong></div>)}</div></section>
-      </div>
-      <Movements />
+      <header className="dashboard-header">
+        <div><p className="eyebrow">Riepilogo mensile</p><h1>Panoramica</h1></div>
+        <div className="header-tools date-chip" role="group" aria-label="Periodo del riepilogo">
+          <button className="icon-button" type="button" aria-label="Mese precedente" disabled={month <= "0001-01"} onClick={() => selectMonth(-1)}><ChevronLeft size={16} /></button>
+          <span aria-live="polite">{period.label}</span>
+          <button className="icon-button" type="button" aria-label="Mese successivo" disabled={month >= currentMonth} onClick={() => selectMonth(1)}><ChevronRight size={16} /></button>
+        </div>
+      </header>
+      <DashboardData key={period.to} client={client} sessionSignal={sessionSignal} period={period} />
       <footer className="dashboard-footer"><span>FinanceTracker</span><button className="logout-button" type="button" onClick={() => { void signOut(); }}>Esci<LogOut size={14} aria-hidden="true" /></button></footer>
     </main>
   </div>;

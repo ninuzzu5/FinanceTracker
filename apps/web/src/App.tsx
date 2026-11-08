@@ -29,5 +29,5 @@ export function App() {
       {state.status === "logout-error" && <button className="primary-button" onClick={() => { void signOut(); }}>Riprova a uscire</button>}
     </section></main>;
   }
-  return state.status === "authenticated" ? <Dashboard key={state.user.id} /> : <Access />;
+  return state.status === "authenticated" ? <Dashboard key={state.user.id} client={state.client} sessionSignal={state.signal} /> : <Access />;
 }

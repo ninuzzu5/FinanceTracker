@@ -51,7 +51,7 @@ export function Access() {
         <button className="primary-button" type="submit" disabled={pending || !configured}>{pending ? "Accesso in corso…" : "Accedi"} <ArrowRight size={21} aria-hidden="true" /></button>
         <p className="access-notice" role="status">{message || "Accedi con il tuo account autorizzato."}</p>
       </form>
-      <div className="access-footer"><ShieldCheck size={23} aria-hidden="true" /><span>Autenticazione tramite Supabase. La dashboard mostra ancora dati di esempio.</span></div>
+      <div className="access-footer"><ShieldCheck size={23} aria-hidden="true" /><span>Accesso con Supabase e verifica in due passaggi.</span></div>
     </section>
   </main>;
 }
