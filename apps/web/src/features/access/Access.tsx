@@ -49,11 +49,11 @@ export function Access() {
         <form noValidate onSubmit={event => { void submit(event); }} aria-busy={pending}>
           <label className="zine-field" htmlFor="email"><span className="zine-label">Email</span>
             <div className="zine-input-wrap"><input className="zine-input" id="email" name="email" type="email" placeholder="nome@esempio.it" autoComplete="username" required disabled={pending || !configured} />
-              <Mail size={18} aria-hidden="true" className="zine-input-eye" style={{ right: "auto", left: 14, pointerEvents: "none" }} /></div>
+              <Mail size={18} aria-hidden="true" className="zine-input-eye" /></div>
           </label>
           <label className="zine-field" htmlFor="password"><span className="zine-label">Password</span>
             <div className="zine-input-wrap"><input className="zine-input" id="password" name="password" type={visible ? "text" : "password"} placeholder="la tua password" autoComplete="current-password" required disabled={pending || !configured} />
-              <LockKeyhole size={18} aria-hidden="true" className="zine-input-eye" style={{ right: "auto", left: 14, pointerEvents: "none" }} />
+              <LockKeyhole size={18} aria-hidden="true" className="zine-input-eye" />
               <button className="zine-input-eye" type="button" aria-label={visible ? "Nascondi password" : "Mostra password"} aria-pressed={visible} disabled={pending || !configured} onClick={() => setVisible(!visible)}>{visible ? <EyeOff size={18} /> : <Eye size={18} />}</button></div>
           </label>
           <p className="zine-access-recovery"><button type="button" className="zine-chip zine-chip-sm" disabled title="Recupero password non ancora disponibile">Password dimenticata? Non disponibile</button></p>

@@ -175,9 +175,10 @@ button, a, input { transition: transform .12s, box-shadow .12s, background-color
 .zine-field .zine-label { display: block; }
 .zine-input-wrap { position: relative; }
 .zine-input { width: 100%; box-sizing: border-box; min-height: 56px; padding: 0 16px; border: var(--border-width) solid var(--ink); background: #FFFDF4; font-family: var(--font-amount); font-size: 18px; color: var(--ink); }
-.zine-input-wrap .zine-input { padding-left: 44px; padding-right: 44px; }
+.zine-input-wrap .zine-input { padding-left: 52px; padding-right: 44px; }
 .zine-input::placeholder { color: #8a8070; }
-.zine-input-eye { position: absolute; right: 6px; top: 50%; transform: translateY(-50%); width: 36px; height: 36px; border: 0; background: transparent; display: inline-flex; align-items: center; justify-content: center; }
+.zine-input-eye { position: absolute; left: 16px; top: 50%; transform: translateY(-50%); width: 20px; height: 20px; display: inline-flex; align-items: center; justify-content: center; color: #6b6253; }
+button.zine-input-eye { left: auto; right: 10px; width: 36px; height: 36px; border: 0; background: transparent; color: var(--ink); cursor: pointer; }
 .zine-mfa-qr { display: block; width: 220px; max-width: 100%; height: auto; margin: 0 auto; padding: 12px; background: #fff; border: var(--border-width) solid var(--ink); }
 
 /* Animazioni: solo quando l'utente non ha chiesto di ridurle. */
