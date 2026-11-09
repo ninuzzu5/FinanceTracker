@@ -48,6 +48,7 @@ export function Calendar({ totals, monthStart, today }: { totals: Statistics; mo
       </ul>
       <p className="zine-key" style={{ marginTop: 14 }}>poco <i style={{ background: levelColors[0] }} /><i style={{ background: levelColors[1] }} />
         <i style={{ background: levelColors[2] }} /><i style={{ background: levelColors[3] }} /> tanto</p>
+      <p className="zine-chart-note">Il colore indica quanto hai speso quel giorno rispetto agli altri del periodo: dal giallo chiaro (poco) al rosso (il giorno più caro).</p>
     </div>
   </section>;
 }

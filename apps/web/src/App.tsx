@@ -29,7 +29,7 @@ export function App() {
           {state.status === "loading" && <div className="zine-progress" />}
           {state.status === "verification-error" && <p style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
             <button className="zine-button" onClick={retry}>Riprova la verifica</button>
-            <button className="zine-chip" onClick={() => { void signOut(); }}>Esci</button>
+            <button className="zine-link zine-link-sm" onClick={() => { void signOut(); }}>Esci</button>
           </p>}
           {state.status === "logout-error" && <button className="zine-button" onClick={() => { void signOut(); }}>Riprova a uscire</button>}
         </div>

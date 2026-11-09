@@ -22,7 +22,7 @@ export function Movements({ entries, accounts }: { entries: Movement[]; accounts
     <div className="zine-card-body zine-torn" id="movimenti">
       <h2 className="zine-heading zine-heading-md"><span className="zine-highlight">Movimenti</span></h2>
       <div className="zine-filters" role="group" aria-label="Filtra per tipo">
-        {filters.map(f => <button key={f.id} type="button" className="zine-chip zine-chip-sm" aria-pressed={filter === f.id}
+        {filters.map(f => <button key={f.id} type="button" className="zine-link zine-link-sm" aria-pressed={filter === f.id}
           onClick={() => { setFilter(f.id); setVisible(displayPageSize); }}>{f.label}</button>)}
       </div>
       <p className="zine-chart-note" style={{ margin: "0 0 10px" }}>Trasferimenti e movimenti annullati restano qui, ma non entrano nei totali e nei grafici.</p>
@@ -30,14 +30,14 @@ export function Movements({ entries, accounts }: { entries: Movement[]; accounts
         <div className="zine-table-scroll">
           <table className="zine-table">
             <caption className="sr-only">Movimenti del periodo selezionato</caption>
-            <colgroup><col className="c1" /><col /><col className="c3" /><col className="c4" /></colgroup>
+            <colgroup><col className="c1" /><col className="c2" /><col className="c3" /><col className="c4" /></colgroup>
             <thead><tr><th scope="col">Data</th><th scope="col">Categoria</th><th scope="col">Conto</th><th scope="col" style={{ textAlign: "right" }}>Importo</th></tr></thead>
             <tbody>{filtered.slice(0, visible).map(movement => {
               const transfer = movement.type === "transfer";
               const icon = transfer ? transferIcon : categoryIcon(movement.category);
               const label = transfer ? "Trasferimento" : labelForCategory(movement.category);
               return <tr key={movement.id} className={movement.voided ? "zine-void" : undefined}>
-                <td><time dateTime={movement.date}>{formatDay(movement.date)}</time>{movement.voided && <div><span className="zine-chip-static">ANNULLATO</span></div>}</td>
+                <td className="zine-date-cell"><time dateTime={movement.date}>{formatDay(movement.date)}</time>{movement.voided && <div><span className="zine-chip-static">ANNULLATO</span></div>}</td>
                 <td><span className="zine-category-cell"><img src={icon} alt="" />
                   <span className={movement.voided ? "zine-strike" : undefined}>{label}</span></span></td>
                 <td>{transfer
@@ -51,7 +51,7 @@ export function Movements({ entries, accounts }: { entries: Movement[]; accounts
           </table>
         </div>
         {visible < filtered.length && <div className="zine-more-button">
-          <button className="zine-chip" type="button" onClick={() => setVisible(count => count + displayPageSize)}>
+          <button className="zine-button" type="button" onClick={() => setVisible(count => count + displayPageSize)}>
             Mostra altri {Math.min(displayPageSize, filtered.length - visible)} movimenti
           </button>
         </div>}

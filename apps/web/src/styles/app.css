@@ -18,7 +18,7 @@ button, a, input { transition: transform .12s, box-shadow .12s, background-color
 
 /* Pagina: sfondo carta a puntini, come .zn del mockup. */
 .zine-page { position: relative; min-height: 100vh; background: var(--paper) radial-gradient(var(--paper-dot) 1px, transparent 1.5px) 0 0 / 14px 14px; padding: 36px; }
-.zine-wrap { max-width: 1296px; margin: 0 auto; display: flex; flex-direction: column; gap: 34px; }
+.zine-wrap { max-width: 1296px; margin: 0 auto; display: flex; flex-direction: column; gap: 44px; }
 
 /* Marchio (Brand.tsx): etichetta nera/gialla ruotata. */
 .brand { display: inline-flex; align-items: center; gap: 9px; font-family: var(--font-display); font-size: 28px; font-weight: 400; letter-spacing: .5px; white-space: nowrap; background: var(--ink); color: var(--yellow); padding: 8px 18px; transform: rotate(-2deg); border: var(--border-width) solid var(--ink); box-shadow: var(--shadow-hard); }
@@ -27,24 +27,48 @@ button, a, input { transition: transform .12s, box-shadow .12s, background-color
 .brand-large { font-size: 40px; gap: 12px; padding: 12px 26px; }
 .brand-large .brand-mark { width: 28px; height: 32px; }
 
-/* Barra superiore: marchio, navigazione a "chip", uscita. Niente sidebar: i link scorrono alla sezione. */
+/* Barra superiore: marchio, navigazione a link, uscita. Niente sidebar: i link scorrono alla sezione. */
 .zine-topbar { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 14px; }
-.zine-nav { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+.zine-nav { display: flex; gap: 20px; align-items: center; }
 
-/* Pulsante/chip condiviso: bordo nero 3px, ombra dura, Bowlby One. */
-.zine-chip, .zine-button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 44px; padding: 0 18px; border: var(--border-width) solid var(--ink); background: #fff; color: var(--ink); font-family: var(--font-display); font-size: 15px; box-shadow: 4px 4px 0 var(--ink); cursor: pointer; box-sizing: border-box; }
-.zine-chip[aria-pressed="true"], .zine-chip.is-active { background: var(--yellow); }
-.zine-chip:not(:disabled):hover, .zine-button:not(:disabled):hover { transform: translate(-1px, -1px); box-shadow: 6px 6px 0 var(--ink); }
-.zine-chip:not(:disabled):active, .zine-button:not(:disabled):active { transform: translate(3px, 3px); box-shadow: 1px 1px 0 var(--ink); }
-.zine-chip-sm { min-height: 44px; font-size: 14px; box-shadow: 3px 3px 0 var(--ink); padding: 0 14px; }
-.zine-button { min-height: 52px; padding: 0 24px; background: var(--red); color: #fff; font-size: 19px; box-shadow: 5px 5px 0 var(--ink); }
+/* Tre livelli di controllo. Ombra dura e inclinazione restano solo sulle schede (.zine-card):
+   i controlli non le usano mai, per non sembrare schede a loro volta. */
+
+/* 1) Primario: pieno colore, per l'azione principale di una scheda o di un flusso. */
+.zine-button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 48px; padding: 0 22px; border: 2px solid var(--ink); background: var(--red); color: #fff; font-family: var(--font-display); font-size: 16px; cursor: pointer; box-sizing: border-box; }
+.zine-button:not(:disabled):hover { filter: brightness(1.08); }
+.zine-button:not(:disabled):active { filter: brightness(.94); }
 .zine-button-alt { background: #fff; color: var(--ink); }
 .zine-button-wide { width: 100%; }
 
-/* Selettore di periodo: frecce + etichetta a mano libera. */
-.zine-period-bar { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
-.zine-period-nav { padding: 0 18px; font-size: 22px; }
-.zine-period-label { font-family: var(--font-hand); font-weight: 700; font-size: 32px; }
+/* 2) Segmentato: un unico blocco con voci attaccate, voce attiva gialla. Per il selettore di
+   periodo e, su una riga propria, qualunque altro gruppo di scelte esclusive e pari peso. */
+.zine-segmented { display: inline-flex; border: 2px solid var(--ink); background: #fff; box-sizing: border-box; }
+.zine-segmented-item { flex: 1; display: inline-flex; align-items: center; justify-content: center; min-height: 42px; padding: 0 14px; border: 0; border-left: 2px solid var(--ink); background: transparent; color: var(--ink); font-family: var(--font-display); font-size: 14px; cursor: pointer; white-space: nowrap; }
+.zine-segmented-item:first-child { border-left: 0; }
+.zine-segmented-item[aria-pressed="true"] { background: var(--yellow); }
+.zine-segmented-item:not(:disabled):hover { background: var(--yellow-soft); }
+.zine-segmented-item[aria-pressed="true"]:not(:disabled):hover { background: var(--yellow); }
+
+/* Pulsanti icona (frecce di periodo): nessun bordo/ombra, solo un'area di tocco. */
+.zine-icon-button { display: inline-flex; align-items: center; justify-content: center; width: 40px; height: 40px; border: 0; background: transparent; color: var(--ink); cursor: pointer; flex: none; }
+.zine-icon-button:not(:disabled):hover { background: var(--yellow-soft); }
+
+/* 3) Link: solo testo, la voce attiva con sottolineatura a evidenziatore gialla. Per la
+   navigazione, "Esci", i filtri della tabella e le azioni secondarie. */
+.zine-link { display: inline-flex; align-items: center; gap: 6px; border: 0; background: transparent; padding: 4px 2px; color: var(--ink); font-family: var(--font-display); font-size: 15px; cursor: pointer; }
+.zine-link:not(:disabled):hover { color: #000; }
+.zine-link[aria-current], .zine-link[aria-pressed="true"] { background: linear-gradient(transparent 78%, var(--yellow) 78%); }
+.zine-link-sm { font-size: 13px; color: #555; }
+.zine-link-sm:not(:disabled):hover { color: var(--ink); }
+.zine-link-sm[aria-current], .zine-link-sm[aria-pressed="true"] { color: var(--ink); font-weight: 600; }
+.zine-link:disabled { cursor: not-allowed; color: #8a8070; opacity: 1; }
+
+/* Selettore di periodo: segmentato (quattro voci) + frecce/etichetta sulla stessa riga, compatte. */
+.zine-period-row { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; }
+.zine-segmented.zine-period-modes { flex: 1 1 320px; }
+.zine-period-bar { display: flex; align-items: center; gap: 4px; }
+.zine-period-label { font-family: var(--font-hand); font-weight: 700; font-size: 26px; min-width: 9ch; text-align: center; }
 
 /* Titolo "a ritagli": una parola per rettangolo colorato ruotato. */
 .zine-title { margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 3px; }
@@ -80,7 +104,7 @@ button, a, input { transition: transform .12s, box-shadow .12s, background-color
 
 /* Riepilogo mensile e sezione conti. */
 .zine-summary { margin-bottom: 4px; }
-.zine-section-heading { display: flex; align-items: baseline; margin-bottom: 4px; }
+.zine-section-heading { display: flex; align-items: baseline; margin-bottom: 18px; }
 .zine-accounts { margin-bottom: 4px; }
 .zine-account-card .zine-card-body { display: flex; flex-direction: column; gap: 14px; }
 .zine-account-head { display: flex; align-items: center; min-height: 40px; }
@@ -113,6 +137,9 @@ button, a, input { transition: transform .12s, box-shadow .12s, background-color
 .zine-key { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 15px; margin: 10px 0 0; }
 .zine-key i { display: inline-block; width: 18px; height: 18px; border: 2px solid var(--ink); }
 .zine-chart-note { font-size: 14px; line-height: 1.6; color: #333; margin-top: 10px; }
+/* Il grafico barre+linea riempie l'altezza della scheda invece di lasciare spazio vuoto sotto. */
+.zine-chart-card { display: flex; flex-direction: column; }
+.zine-chart-fill { flex: 1; min-height: 240px; display: flex; }
 
 /* Calendario del mese/settimana. */
 .zine-calendar { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 6px; text-align: center; }
@@ -137,14 +164,15 @@ button, a, input { transition: transform .12s, box-shadow .12s, background-color
 /* Movimenti: filtri, tabella a colonne fisse, bordo strappato. */
 .zine-filters { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
 .zine-table-scroll { overflow-x: auto; }
-.zine-table { width: 100%; min-width: 560px; border-collapse: collapse; font-size: 16px; table-layout: fixed; }
-.zine-table col.c1 { width: 72px; } .zine-table col.c3 { width: 150px; } .zine-table col.c4 { width: 150px; }
+.zine-table { width: 100%; min-width: 620px; border-collapse: collapse; font-size: 16px; table-layout: fixed; }
+.zine-table col.c1 { width: 15%; } .zine-table col.c2 { width: 31%; } .zine-table col.c3 { width: 32%; } .zine-table col.c4 { width: 22%; }
 .zine-table th { font-family: var(--font-display); font-weight: 400; font-size: 12px; letter-spacing: 1px; text-align: left; padding: 8px 10px; border-bottom: 3px solid var(--ink); }
 .zine-table td { padding: 9px 10px; border-bottom: 2px dashed var(--ink); vertical-align: middle; height: 54px; box-sizing: border-box; }
+.zine-table td.zine-date-cell { white-space: nowrap; }
 .zine-table td.zine-amount-cell { text-align: right; font-family: var(--font-amount); font-weight: 800; font-size: 17px; white-space: nowrap; }
-.zine-category-cell { display: inline-flex; align-items: center; gap: 10px; font-weight: 700; }
+.zine-category-cell { display: inline-flex; align-items: center; gap: 10px; font-weight: 700; white-space: nowrap; }
 .zine-category-cell img { width: 30px; height: 30px; flex: none; }
-.zine-route { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.zine-route { display: inline-flex; align-items: center; gap: 8px; flex-wrap: nowrap; white-space: nowrap; }
 .zine-table .zine-pill, .zine-table .zine-cash { height: 32px; box-sizing: border-box; padding: 0 10px; border-width: 2px; font-size: 14px; }
 .zine-table .zine-cash img { width: 18px; height: 18px; }
 .zine-void td { color: #555; }
@@ -209,13 +237,24 @@ button.zine-input-eye { left: auto; right: 10px; width: 36px; height: 36px; bord
 /* Soglia telefono (Specifiche.dc.html → Regole). */
 @media (max-width: 760px) {
   .zine-page { padding: 16px; }
-  .zine-wrap { gap: 26px; }
+  .zine-wrap { gap: 32px; }
   .zine-span-2 { grid-column: auto; }
   .zine-card-body { padding: 26px 16px 22px; }
   .brand { font-size: 20px; padding: 6px 14px; }
   .zine-heading-lg { font-size: 30px; }
   .zine-heading-md { font-size: 26px; }
-  .zine-period-label { font-size: 26px; }
+  /* Navigazione: riga scorrevole invece di andare a capo su più righe di pulsanti.
+     Il marchio e "Esci" restano protetti dalla loro larghezza minima di contenuto;
+     la nav va a capo sulla propria riga intera, dove può scorrere in orizzontale. */
+  .zine-nav { flex: 1 1 100%; overflow-x: auto; gap: 16px; padding-bottom: 2px; -webkit-overflow-scrolling: touch; }
+  /* Selettore segmentato su una riga a quattro colonne uguali; frecce con l'etichetta sotto. */
+  .zine-period-row { gap: 10px; }
+  .zine-segmented.zine-period-modes { width: 100%; flex-basis: 100%; }
+  .zine-segmented-item { padding: 0 6px; font-size: 13px; }
+  .zine-period-bar { display: grid; grid-template-columns: 1fr 1fr; grid-template-areas: "prev next" "label label"; justify-items: center; align-items: center; gap: 2px 0; width: 100%; }
+  .zine-period-bar .zine-icon-button:first-child { grid-area: prev; justify-self: end; }
+  .zine-period-bar .zine-icon-button:last-child { grid-area: next; justify-self: start; }
+  .zine-period-label { grid-area: label; font-size: 22px; }
   .zine-grid-2 { grid-template-columns: 1fr; }
   .zine-pie-row { gap: 18px; }
   .zine-summary .zine-grid { grid-template-columns: 1fr 1fr; gap: 16px; }

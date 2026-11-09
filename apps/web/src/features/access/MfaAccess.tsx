@@ -59,7 +59,7 @@ export function MfaAccess() {
         </form>}
         <p className="zine-access-notice" role="status">{notice || "La dashboard resta bloccata fino al completamento della verifica."}</p>
         <p className="zine-access-note">Dispositivo perso? Usa un altro Authenticator già associato oppure contatta l’amministratore per il recupero verificato dell’account.</p>
-        <p style={{ margin: "10px 0 0" }}><button className="zine-chip zine-chip-sm" type="button" onClick={() => { void signOut(); }}>Esci</button></p>
+        <p style={{ margin: "10px 0 0" }}><button className="zine-link zine-link-sm" type="button" onClick={() => { void signOut(); }}>Esci</button></p>
       </div>
     </section>
   </main>;

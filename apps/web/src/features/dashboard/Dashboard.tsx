@@ -21,7 +21,8 @@ const navigation = [
   { id: "analisi", label: "Analisi" },
   { id: "conti", label: "Conti" },
 ] as const;
-const modeIds = Object.keys(periodModes) as PeriodMode[];
+// Ordine di lettura del selettore segmentato: dal periodo più corto al più lungo.
+const modeOrder: PeriodMode[] = ["day", "week", "month", "year"];
 const flowAdjective: Record<PeriodMode, string> = { year: "dell'anno", month: "del mese", week: "della settimana", day: "del giorno" };
 
 type ReadAccess = { client: SupabaseClient; sessionSignal: AbortSignal };
@@ -184,37 +185,42 @@ export function Dashboard({ client, sessionSignal }: ReadAccess) {
       <div className="zine-topbar">
         <a href="#dashboard" className="brand" aria-label="FinanceTracker, panoramica"><Brand /></a>
         <nav className="zine-nav" aria-label="Navigazione principale">
-          {navigation.map(({ id, label }) => <a key={id} className="zine-chip" href={`#${id}`} aria-pressed={id === "dashboard" || undefined}>{label}</a>)}
-          <button className="zine-chip" disabled title="Budget non disponibile">Budget · presto</button>
+          {navigation.map(({ id, label }) => <a key={id} className="zine-link" href={`#${id}`} aria-current={id === "dashboard" ? "page" : undefined}>{label}</a>)}
         </nav>
-        <button className="zine-chip" type="button" onClick={() => { void signOut(); }}><LogOut size={16} aria-hidden="true" />Esci</button>
-      </div>
-      <div className="zine-period-bar" role="group" aria-label="Scala temporale">
-        {modeIds.map(mode => <button key={mode} type="button" className="zine-chip" aria-pressed={period.mode === mode}
-          onClick={() => selectMode(mode)}>{periodModes[mode]}</button>)}
+        <button className="zine-link zine-link-sm" type="button" onClick={() => { void signOut(); }}><LogOut size={14} aria-hidden="true" />Esci</button>
       </div>
       <main id="contenuto" tabIndex={-1}>
         <h1 className="sr-only">Panoramica</h1>
-        <DashboardContent client={client} sessionSignal={sessionSignal} period={period} selectPeriod={selectPeriod} />
+        <DashboardContent client={client} sessionSignal={sessionSignal} period={period} selectPeriod={selectPeriod} selectMode={selectMode} />
       </main>
       <footer className="zine-footer"><Mascot state="happy" size={44} /><span>FinanceTracker · dati dal bot Telegram · sola lettura</span></footer>
     </div>
   </div>;
 }
 
-function DashboardContent({ client, sessionSignal, period, selectPeriod }: ReadAccess & { period: Period; selectPeriod: (offset: number) => void }) {
-  return <div style={{ display: "flex", flexDirection: "column", gap: 34 }}>
-    <DashboardPeriodNav period={period} selectPeriod={selectPeriod} />
+function DashboardContent({ client, sessionSignal, period, selectPeriod, selectMode }: ReadAccess & {
+  period: Period; selectPeriod: (offset: number) => void; selectMode: (mode: PeriodMode) => void;
+}) {
+  return <div style={{ display: "flex", flexDirection: "column", gap: 44 }}>
+    <PeriodControls period={period} selectPeriod={selectPeriod} selectMode={selectMode} />
     <DashboardData key={`${period.mode}:${period.from}:${period.to}`} client={client} sessionSignal={sessionSignal} period={period} />
   </div>;
 }
 
-function DashboardPeriodNav({ period, selectPeriod }: { period: Period; selectPeriod: (offset: number) => void }) {
-  return <div className="zine-period-bar" role="group" aria-label="Navigazione del periodo">
-    <button className="zine-chip zine-period-nav" type="button" aria-label={`${periodModes[period.mode]} precedente`}
-      disabled={period.from <= firstDate} onClick={() => selectPeriod(-1)}><ChevronLeft size={18} /></button>
-    <span className="zine-period-label" aria-live="polite">{period.label}</span>
-    <button className="zine-chip zine-period-nav" type="button" aria-label={`${periodModes[period.mode]} successivo`}
-      disabled={period.current} onClick={() => selectPeriod(1)}><ChevronRight size={18} /></button>
+function PeriodControls({ period, selectPeriod, selectMode }: {
+  period: Period; selectPeriod: (offset: number) => void; selectMode: (mode: PeriodMode) => void;
+}) {
+  return <div className="zine-period-row">
+    <div className="zine-segmented zine-period-modes" role="group" aria-label="Scala temporale">
+      {modeOrder.map(mode => <button key={mode} type="button" className="zine-segmented-item" aria-pressed={period.mode === mode}
+        onClick={() => selectMode(mode)}>{periodModes[mode]}</button>)}
+    </div>
+    <div className="zine-period-bar" role="group" aria-label="Navigazione del periodo">
+      <button className="zine-icon-button" type="button" aria-label={`${periodModes[period.mode]} precedente`}
+        disabled={period.from <= firstDate} onClick={() => selectPeriod(-1)}><ChevronLeft size={18} /></button>
+      <span className="zine-period-label" aria-live="polite">{period.label}</span>
+      <button className="zine-icon-button" type="button" aria-label={`${periodModes[period.mode]} successivo`}
+        disabled={period.current} onClick={() => selectPeriod(1)}><ChevronRight size={18} /></button>
+    </div>
   </div>;
 }

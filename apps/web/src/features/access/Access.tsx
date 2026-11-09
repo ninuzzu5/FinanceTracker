@@ -56,7 +56,7 @@ export function Access() {
               <LockKeyhole size={18} aria-hidden="true" className="zine-input-eye" />
               <button className="zine-input-eye" type="button" aria-label={visible ? "Nascondi password" : "Mostra password"} aria-pressed={visible} disabled={pending || !configured} onClick={() => setVisible(!visible)}>{visible ? <EyeOff size={18} /> : <Eye size={18} />}</button></div>
           </label>
-          <p className="zine-access-recovery"><button type="button" className="zine-chip zine-chip-sm" disabled title="Recupero password non ancora disponibile">Password dimenticata? Non disponibile</button></p>
+          <p className="zine-access-recovery"><button type="button" className="zine-link zine-link-sm" disabled title="Recupero password non ancora disponibile">Password dimenticata? Non disponibile</button></p>
           <p style={{ margin: "22px 0 0" }}><button className="zine-button zine-button-wide" type="submit" disabled={pending || !configured}>{pending ? "Accesso in corso…" : "Accedi"} <ArrowRight size={19} aria-hidden="true" /></button></p>
           <p className="zine-access-notice" role="status">{message || "Accedi con il tuo account autorizzato."}</p>
         </form>
