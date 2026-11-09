@@ -3,8 +3,16 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const sdk = vi.hoisted(() => ({ createClient: vi.fn(() => ({ auth: {} })) }));
 vi.mock("@supabase/supabase-js", () => ({ createClient: sdk.createClient }));
 
-beforeEach(() => { vi.resetModules(); });
+beforeEach(() => { vi.resetModules(); vi.stubEnv("VITE_SUPABASE_WEB_USER_ID", "00000000-0000-4000-8000-000000000001"); });
 describe("dedicated browser client", () => {
+  it("non inizializza Auth senza l’identificativo dell’account web", async () => {
+    vi.stubEnv("VITE_SUPABASE_URL", "https://project.example.invalid");
+    vi.stubEnv("VITE_SUPABASE_PUBLISHABLE_KEY", "sb_publishable_synthetic");
+    vi.stubEnv("VITE_SUPABASE_WEB_USER_ID", "");
+    const { getBrowserSupabase } = await import("../src/auth/supabase");
+    expect(getBrowserSupabase()).toBeNull();
+    expect(sdk.createClient).not.toHaveBeenCalled();
+  });
   it("does not create a client with missing configuration", async () => {
     vi.stubEnv("VITE_SUPABASE_URL", "");
     vi.stubEnv("VITE_SUPABASE_PUBLISHABLE_KEY", "");

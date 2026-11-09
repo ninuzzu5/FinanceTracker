@@ -3,8 +3,8 @@
 Uso FinanceTracker per registrare entrate, uscite e trasferimenti da Telegram.
 Il bot interpreta il testo con regole TypeScript, mostra un riepilogo e salva
 solo dopo la conferma. Supabase/PostgreSQL conserva i dati contabili.
-La dashboard web usa Supabase Auth per l'accesso e mostra ancora dati di esempio:
-non legge le tabelle finanziarie.
+La dashboard web mostra saldi, movimenti e statistiche in sola lettura dopo
+l’accesso con l’account web dedicato e la verifica MFA.
 
 ## Uso del bot
 
@@ -44,7 +44,7 @@ Per la dashboard, in un altro terminale:
 npm run web:dev
 ```
 
-Configura prima le due variabili pubbliche in `apps/web/.env.local` seguendo la
+Configura prima le variabili pubbliche in `apps/web/.env.local` seguendo la
 [guida web](apps/web/README.md), senza copiare il file privato del bot.
 Apri `http://127.0.0.1:5173/`: `/accesso` richiede un account Supabase autorizzato.
 
@@ -71,4 +71,4 @@ ID personali, saldi o esportazioni reali: vedi [sicurezza](SECURITY.md).
 - Le aperture sono manuali. Un saldo non configurato non vale zero. Le giornate Contanti chiuse non si possono riaprire; le correzioni mantengono il tipo del movimento e l’annullamento lo esclude anche dai saldi storici.
 - Lo schema remoto e Auth/RLS non sono stati verificati da questa pulizia. Non è documentata una prova completata di backup/ripristino. Le [verifiche locali](docs/ci.md) non sostituiscono queste prove o il collaudo Telegram reale.
 - La versione pubblicata v1.0.0 conserva un problema con le modifiche a messaggi estranei; il codice locale lo corregge. Per compilare i campi invia nuove risposte e controlla sempre il riepilogo.
-- La dashboard usa solo dati sintetici. Accesso, recupero password e budget non sono operativi.
+- Il recupero password dalla dashboard e la sezione Budget sono indisponibili.

@@ -18,8 +18,16 @@ Nessuna migrazione è applicata automaticamente dal bot.
 | [007](migrations/007_monetary_integrity_and_eur.sql) | CHECK importi/date, EUR per tutti i conti, controllo EUR nella RPC di salvataggio | Dopo 006 e [preflight READ ONLY](preflight/007_monetary_integrity_and_eur.sql) |
 | [008](migrations/008_transaction_management.sql) | Versioni, annullamento logico, audit e RPC storiche; saldi senza movimenti annullati | Dopo 007 e [preflight READ ONLY](preflight/008_transaction_management.sql); revoca UPDATE/DELETE diretti |
 | [009](migrations/009_restrict_ledger_writes.sql) | Revoca scritture dirette su conti e transazioni, comprese colonne e PUBLIC; verifica ruoli ereditati e proprietari RPC | Dopo 008 e confronto dei privilegi effettivi; nessuna modifica dei dati |
+| [010](migrations/010_shared_read_access.sql) | Registro privato vuoto, letture del proprietario associato a livello `aal2` e blocco DML del viewer | Dopo 009, con RLS, policy e privilegi verificati |
+| [011](migrations/011_shared_balance_queries.sql) | RPC dashboard in sola lettura e calcolo canonico dei saldi | Dopo 010, prima di registrare l’associazione |
 
-**Database nuovo:** 001 → 002 → 004 → 005 → 006 → 007 → 008 → 009. La baseline 001
+Per abilitare la dashboard sui dati reali, qualificare 010 e 011 in un ambiente di
+test, verificare catalogo e Data API, quindi registrare l’associazione con una
+distinta operazione amministrativa. Lo schema `financetracker_private` deve
+restare fuori dagli schemi esposti. Conservare gli UUID nel registro privato.
+Disabilitare la riga per revocare le letture mantenendo il blocco delle scritture.
+
+**Database nuovo:** 001 → 002 → 004 → 005 → 006 → 007 → 008 → 009 → 010 → 011. La baseline 001
 include già il CHECK corretto: non eseguire 003 come passaggio obbligatorio.
 **Database esistente:** confronta catalogo, policy, grant e vincoli; applica soltanto
 i passaggi mancanti, nell'ordine dipendente. Non dedurre applicazione dal nome dei

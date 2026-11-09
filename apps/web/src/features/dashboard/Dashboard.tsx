@@ -1,67 +1,226 @@
-import { useEffect, useRef, useState } from "react";
-import { ArrowDownLeft, ArrowUpRight, CalendarDays, ChartNoAxesCombined, Coins, FlaskConical, LayoutDashboard, ListFilter, LogOut, Menu, ShieldCheck, Wallet, X } from "lucide-react";
-import { accountLabels } from "@finance-tracker/domain";
+import { useEffect, useState } from "react";
+import { ChevronLeft, ChevronRight, LogOut } from "lucide-react";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { Brand } from "../../components/Brand";
-import { demo, demoAccounts } from "../../data/demo";
 import { CategoryChart, SpendingChart } from "./Charts";
+import { Calendar } from "./Calendar";
+import { TopSpending } from "./TopSpending";
+import { AccountLogo } from "./AccountLogo";
+import { Mascot } from "./Mascot";
 import { Movements } from "./Movements";
 import { useAuth } from "../../auth/AuthProvider";
+import { DashboardAccessError, loadDashboard } from "./dashboard-data";
+import {
+  amountSizeClass, dashboardPeriod, firstDate, formatDay, money, periodModes, shiftPeriod, statistics,
+  titlePieces, todayInRome, type Period, type PeriodMode,
+} from "./dashboard-model";
 
 const navigation = [
-  { id: "dashboard", label: "Panoramica", Icon: LayoutDashboard },
-  { id: "movimenti", label: "Movimenti", Icon: ListFilter },
-  { id: "analisi", label: "Analisi", Icon: ChartNoAxesCombined },
-  { id: "budget", label: "Budget", Icon: ShieldCheck },
-  { id: "conti", label: "Conti", Icon: Wallet },
+  { id: "dashboard", label: "Panoramica" },
+  { id: "movimenti", label: "Movimenti" },
+  { id: "analisi", label: "Analisi" },
+  { id: "conti", label: "Conti" },
 ] as const;
+// Ordine di lettura del selettore segmentato: dal periodo più corto al più lungo.
+const modeOrder: PeriodMode[] = ["day", "week", "month", "year"];
+const flowAdjective: Record<PeriodMode, string> = { year: "dell'anno", month: "del mese", week: "della settimana", day: "del giorno" };
 
-function MiniChart({ bars = false, muted = false }: { bars?: boolean; muted?: boolean }) {
-  return <svg className={`mini-chart${muted ? " muted-chart" : ""}`} viewBox="0 0 106 52" aria-hidden="true">{bars ? <g fill="currentColor"><rect x="4" y="35" width="6" height="14" rx="1" /><rect x="17" y="23" width="6" height="26" rx="1" /><rect x="30" y="29" width="6" height="20" rx="1" /><rect x="43" y="12" width="6" height="37" rx="1" /><rect x="56" y="4" width="6" height="45" rx="1" /><rect x="69" y="19" width="6" height="30" rx="1" /><rect x="82" y="27" width="6" height="22" rx="1" /><rect x="95" y="16" width="6" height="33" rx="1" /></g> : <><path d="M2 45L15 37L25 39L36 26L47 23L59 29L70 18L82 19L93 10L102 6" fill="none" stroke="currentColor" strokeWidth="2" /><circle cx="102" cy="6" r="3" fill="currentColor" /></>}</svg>;
+type ReadAccess = { client: SupabaseClient; sessionSignal: AbortSignal };
+type Progress = { pages: number; entries: number };
+type LoadState = { status: "loading" | "error" | "denied" } |
+  { status: "ready"; data: Awaited<ReturnType<typeof loadDashboard>> };
+
+function DashboardData({ client, sessionSignal, period }: ReadAccess & { period: Period }) {
+  const { retry } = useAuth();
+  const [attempt, setAttempt] = useState(0);
+  const [loaded, setLoaded] = useState<{ scope: AbortSignal; state: LoadState }>();
+  const [progress, setProgress] = useState<Progress>();
+  const state: LoadState = loaded?.scope === sessionSignal ? loaded.state : { status: "loading" };
+
+  useEffect(() => {
+    const request = new AbortController();
+    const signal = AbortSignal.any([sessionSignal, request.signal]);
+    setProgress(undefined);
+    void loadDashboard(client, period, signal, (pages, entries) => {
+      if (!signal.aborted) setProgress({ pages, entries });
+    }).then(data => {
+      if (!signal.aborted) setLoaded({ scope: sessionSignal, state: { status: "ready", data } });
+    }).catch((error: unknown) => {
+      if (signal.aborted) return;
+      request.abort();
+      setLoaded({ scope: sessionSignal, state: { status: error instanceof DashboardAccessError ? "denied" : "error" } });
+    });
+    return () => request.abort();
+  }, [attempt, client, period, sessionSignal]);
+
+  if (sessionSignal.aborted) return null;
+
+  if (state.status === "loading") return <section className="zine-card" style={{ "--tape": "#FFE14Dcc" } as React.CSSProperties}>
+    <div className="zine-card-body zine-state" role="status" aria-busy="true">
+      <div className="zine-state-text">
+        <h2 className="zine-heading zine-heading-md"><span className="zine-highlight">Caricamento</span></h2>
+        <p style={{ margin: "0 0 14px" }}>Caricamento dei dati in corso{progress && progress.pages > 1 ? ` (movimenti letti: ${progress.entries})` : "…"}</p>
+        <div className="zine-progress" />
+      </div>
+      <Mascot state="flip" />
+    </div>
+  </section>;
+
+  if (state.status !== "ready") {
+    const denied = state.status === "denied";
+    return <section className="zine-card" style={{ "--tape": denied ? "#E63946aa" : "#1D4ED8aa" } as React.CSSProperties}>
+      <div className="zine-card-body zine-state">
+        <div className="zine-state-text">
+          <h2 className="zine-heading zine-heading-md"><span className="zine-highlight">{denied ? "Accesso negato" : "Errore"}</span></h2>
+          <p role="alert" style={{ margin: "0 0 16px" }}>{denied ? "Accesso ai dati non autorizzato o sessione scaduta." : "Impossibile caricare i dati del periodo."}</p>
+          {denied ? <button className="zine-button zine-button-alt" onClick={retry}>Verifica la sessione</button>
+            : <button className="zine-button" onClick={() => { setLoaded(undefined); setAttempt(attempt + 1); }}>Riprova</button>}
+        </div>
+        <Mascot state={denied ? "lock" : "dead"} />
+      </div>
+    </section>;
+  }
+
+  const { accounts, entries } = state.data;
+  if (!accounts.length && !entries.length) return <section className="zine-card" style={{ "--tape": "#E63946aa", "--card-bg": "var(--yellow)" } as React.CSSProperties}>
+    <div className="zine-card-body zine-state">
+      <div className="zine-state-text">
+        <span className="zine-stamp">NESSUN DATO</span>
+        <h2 className="zine-heading zine-heading-md"><span className="zine-highlight">Nessun dato</span></h2>
+        <p role="status" style={{ margin: 0 }}>Nessun dato disponibile per il periodo.</p>
+      </div>
+      <Mascot state="sleep" />
+    </div>
+  </section>;
+
+  const totals = statistics(entries, period);
+  const hasCompleteBalance = accounts.length > 0 && accounts.every(account => account.cents !== null);
+  const totalCents = accounts.reduce((sum, account) => sum + (account.cents ?? 0n), 0n);
+  const inRed = hasCompleteBalance && totalCents < 0n;
+  const balance = hasCompleteBalance ? money(totalCents) : "—";
+  const summaryTexts = [balance, money(totals.income), money(totals.expenses)];
+  const summarySize = amountSizeClass(summaryTexts);
+  const accountTexts = accounts.map(a => a.cents !== null ? money(a.cents) : "").filter(Boolean);
+  const accountSize = amountSizeClass(accountTexts);
+  const title = titlePieces(period, totals.expenses);
+
+  return <>
+    <h2 className="zine-title" aria-live="polite">
+      <span className="sr-only">{title.map(p => p.text).join(" ")}</span>
+      {title.map((piece, i) => <span key={i} aria-hidden="true" className="zine-title-piece"
+        style={{ background: piece.background, color: piece.color, transform: `rotate(${piece.angle}deg)` }}>{piece.text}</span>)}
+    </h2>
+    <section className="zine-grid zine-summary" aria-label="Riepilogo finanziario">
+      <section className="zine-card" style={{ "--tilt": "-0.5deg", "--card-bg": inRed ? "#FFC2C7" : "#8FE0A8" } as React.CSSProperties}>
+        <div className="zine-card-body">
+          <h2 className="zine-label">Saldo complessivo</h2>
+          <div className={`zine-amount ${summarySize} ${inRed ? "zine-negative" : ""}`}>{balance}</div>
+          <p className="zine-sub">{hasCompleteBalance ? `Al ${formatDay(period.to)}` : "Saldo complessivo non disponibile"}
+            {inRed && <span className="zine-chip-static" style={{ background: "#fff" }}>IN ROSSO</span>}</p>
+        </div>
+      </section>
+      <section className="zine-card" style={{ "--tilt": "0.5deg" } as React.CSSProperties}>
+        <div className="zine-card-body">
+          <h2 className="zine-label">Entrate {flowAdjective[period.mode]}</h2>
+          <div className={`zine-amount ${summarySize}`}>{money(totals.income)}</div>
+          <p className="zine-sub">Movimenti contabilizzati</p>
+        </div>
+      </section>
+      <section className="zine-card" style={{ "--tilt": "-0.4deg", "--card-bg": "var(--yellow)" } as React.CSSProperties}>
+        <div className="zine-card-body">
+          <h2 className="zine-label">Uscite {flowAdjective[period.mode]}</h2>
+          <div className={`zine-amount ${summarySize}`}>{money(totals.expenses)}</div>
+          <p className="zine-sub">Movimenti contabilizzati</p>
+        </div>
+      </section>
+    </section>
+    <div className="zine-accounts">
+      <div className="zine-section-heading"><h2 className="zine-heading zine-heading-lg" id="conti"><span className="zine-highlight">Conti</span></h2>
+        <span className="zine-count">{accounts.length} {accounts.length === 1 ? "conto" : "conti"}</span></div>
+      {accounts.length === 0 ? <p className="zine-chart-note">Nessun conto disponibile.</p> : <div className="zine-grid">
+        {accounts.map((account, i) => <section className="zine-card zine-account-card" key={account.id} style={{ "--tilt": `${(i % 2 === 0 ? -1 : 1) * 0.4}deg` } as React.CSSProperties}>
+          <div className="zine-card-body">
+            <div className="zine-account-head"><AccountLogo name={account.name} />
+              {!account.active && <span className="zine-chip-static zine-inactive-chip">CONTO INATTIVO</span>}</div>
+            <div className={`zine-amount ${accountSize}`}>
+              {account.cents !== null ? money(account.cents) : account.status === "before_opening" ? "Prima dell'apertura" : "Saldo non configurato"}
+            </div>
+          </div>
+        </section>)}
+      </div>}
+    </div>
+    <div className="zine-grid" id="analisi">
+      <SpendingChart totals={totals} period={period} />
+      <CategoryChart totals={totals} />
+    </div>
+    {(period.mode === "month" || period.mode === "week") && <div className="zine-grid">
+      {period.mode === "month" && <Calendar totals={totals} monthStart={period.from} today={period.to} />}
+      <TopSpending entries={entries} accounts={accounts} />
+    </div>}
+    <Movements accounts={accounts} entries={entries} />
+  </>;
 }
 
-export function Dashboard() {
+export function Dashboard({ client, sessionSignal }: ReadAccess) {
   const { signOut } = useAuth();
-  const [menuOpen, setMenuOpen] = useState(false);
-  const menuButton = useRef<HTMLButtonElement>(null);
-  const [active, setActive] = useState("dashboard");
+  const [today, setToday] = useState(todayInRome);
+  const [period, setPeriod] = useState(() => dashboardPeriod("month", today, today));
+
   useEffect(() => {
-    if (!menuOpen) return;
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        setMenuOpen(false);
-        menuButton.current?.focus();
-      }
+    const updateDate = () => setToday(todayInRome());
+    const timer = window.setInterval(updateDate, 60_000);
+    document.addEventListener("visibilitychange", updateDate);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", updateDate);
     };
-    window.addEventListener("keydown", closeOnEscape);
-    return () => window.removeEventListener("keydown", closeOnEscape);
-  }, [menuOpen]);
-  return <div className="dashboard-shell" id="dashboard">
+  }, []);
+
+  const selectPeriod = (offset: number) => setPeriod(dashboardPeriod(period.mode, shiftPeriod(period.mode, period.from, offset), today));
+  const selectMode = (mode: PeriodMode) => { if (mode !== period.mode) setPeriod(dashboardPeriod(mode, today, today)); };
+
+  return <div className="zine-page" id="dashboard">
     <a href="#contenuto" className="skip-link">Vai al contenuto principale</a>
-    <div className="mobile-bar"><Brand /><button ref={menuButton} type="button" className="icon-button" aria-label={menuOpen ? "Chiudi menu" : "Apri menu"} aria-expanded={menuOpen} aria-controls="sidebar" onClick={() => setMenuOpen(!menuOpen)}>{menuOpen ? <X /> : <Menu />}</button></div>
-    {menuOpen && <button className="menu-overlay" aria-label="Chiudi menu di navigazione" onClick={() => setMenuOpen(false)} />}
-    <aside className={`sidebar glass${menuOpen ? " sidebar-open" : ""}`} id="sidebar" aria-label="Navigazione principale">
-      <a href="/" className="brand-link" aria-label="FinanceTracker, panoramica"><Brand /></a>
-      <span className="sidebar-section-label">Navigazione</span>
-      <nav>{navigation.map(({ id, label, Icon }) => id === "budget" ? <div className="nav-unavailable" key={id}><button type="button" disabled title="Budget non disponibile" aria-describedby="budget-hint"><Icon size={20} />{label}</button><span id="budget-hint" className="sr-only">Budget non disponibile.</span></div> : <a className={`nav-link${active === id ? " active" : ""}`} href={`#${id}`} key={id} aria-current={active === id ? "location" : undefined} onClick={() => { setActive(id); setMenuOpen(false); }}><Icon size={20} aria-hidden="true" />{label}</a>)}</nav>
-      <div className="sidebar-bottom">
-        <button className="access-link logout-button" type="button" onClick={() => { void signOut(); }}><LogOut size={18} aria-hidden="true" />Esci</button>
-        <div className="sidebar-footer">FinanceTracker</div>
+    <div className="zine-wrap">
+      <div className="zine-topbar">
+        <a href="#dashboard" className="brand" aria-label="FinanceTracker, panoramica"><Brand /></a>
+        <nav className="zine-nav" aria-label="Navigazione principale">
+          {navigation.map(({ id, label }) => <a key={id} className="zine-link" href={`#${id}`} aria-current={id === "dashboard" ? "page" : undefined}>{label}</a>)}
+        </nav>
+        <button className="zine-link zine-link-sm" type="button" onClick={() => { void signOut(); }}><LogOut size={14} aria-hidden="true" />Esci</button>
       </div>
-    </aside>
-    <main className="dashboard-main" id="contenuto" tabIndex={-1}>
-      <header className="dashboard-header"><div><p className="eyebrow">Riepilogo mensile</p><h1>Panoramica</h1></div><div className="header-tools"><span className="date-chip"><CalendarDays size={16} aria-hidden="true" />{demo.period}</span><div className="profile-avatar" aria-label="FinanceTracker">F</div></div></header>
-      <div className="demo-banner"><span><FlaskConical size={16} aria-hidden="true" /><strong>Dati di esempio</strong></span></div>
-      <section className="summary-grid" aria-label="Riepilogo finanziario">
-        <article className="glass summary-card summary-card-primary"><div className="summary-icon mint-icon"><Coins size={25} aria-hidden="true" /></div><div className="summary-body"><h2>Patrimonio totale</h2><strong>{demo.netWorth}</strong><p><span className="positive"><ArrowUpRight size={13} aria-hidden="true" />{demo.netWorthChange}</span><span>rispetto al mese scorso</span></p></div><MiniChart /></article>
-        <article className="glass summary-card"><div className="summary-icon mint-icon"><ArrowDownLeft size={27} aria-hidden="true" /></div><div className="summary-body"><h2>Entrate mensili</h2><strong>{demo.income}</strong><p><span className="positive"><ArrowUpRight size={13} aria-hidden="true" />{demo.incomeChange}</span><span>rispetto al mese scorso</span></p></div><MiniChart bars /></article>
-        <article className="glass summary-card"><div className="summary-icon coral-icon"><ArrowUpRight size={27} aria-hidden="true" /></div><div className="summary-body"><h2>Uscite mensili</h2><strong>{demo.expenses}</strong><p><span className="positive"><ArrowDownLeft size={13} aria-hidden="true" />{demo.expensesChange}</span><span>rispetto al mese scorso</span></p></div><MiniChart bars muted /></article>
-      </section>
-      <div className="detail-grid">
-        <SpendingChart /><CategoryChart />
-        <section className="glass accounts-panel" id="conti" aria-labelledby="accounts-title"><div className="panel-heading"><h2 id="accounts-title">Conti</h2><span className="quiet-label">3 conti</span></div><div className="accounts-list">{demoAccounts.map(account => <div className="account-row" key={account.id}><span className={`account-logo account-${account.id}`} aria-hidden="true">{account.monogram || <Wallet size={23} />}</span><div className="account-info"><h3>{accountLabels[account.id]}</h3><p>{account.description}</p></div><strong>{account.balance}</strong></div>)}</div></section>
-      </div>
-      <Movements />
-      <footer className="dashboard-footer"><span>FinanceTracker</span><button className="logout-button" type="button" onClick={() => { void signOut(); }}>Esci<LogOut size={14} aria-hidden="true" /></button></footer>
-    </main>
+      <main id="contenuto" tabIndex={-1}>
+        <h1 className="sr-only">Panoramica</h1>
+        <DashboardContent client={client} sessionSignal={sessionSignal} period={period} selectPeriod={selectPeriod} selectMode={selectMode} />
+      </main>
+      <footer className="zine-footer"><Mascot state="happy" size={44} /><span>FinanceTracker · dati dal bot Telegram · sola lettura</span></footer>
+    </div>
+  </div>;
+}
+
+function DashboardContent({ client, sessionSignal, period, selectPeriod, selectMode }: ReadAccess & {
+  period: Period; selectPeriod: (offset: number) => void; selectMode: (mode: PeriodMode) => void;
+}) {
+  return <div style={{ display: "flex", flexDirection: "column", gap: 44 }}>
+    <PeriodControls period={period} selectPeriod={selectPeriod} selectMode={selectMode} />
+    <DashboardData key={`${period.mode}:${period.from}:${period.to}`} client={client} sessionSignal={sessionSignal} period={period} />
+  </div>;
+}
+
+function PeriodControls({ period, selectPeriod, selectMode }: {
+  period: Period; selectPeriod: (offset: number) => void; selectMode: (mode: PeriodMode) => void;
+}) {
+  return <div className="zine-period-row">
+    <div className="zine-segmented zine-period-modes" role="group" aria-label="Scala temporale">
+      {modeOrder.map(mode => <button key={mode} type="button" className="zine-segmented-item" aria-pressed={period.mode === mode}
+        onClick={() => selectMode(mode)}>{periodModes[mode]}</button>)}
+    </div>
+    <div className="zine-period-bar" role="group" aria-label="Navigazione del periodo">
+      <button className="zine-icon-button" type="button" aria-label={`${periodModes[period.mode]} precedente`}
+        disabled={period.from <= firstDate} onClick={() => selectPeriod(-1)}><ChevronLeft size={18} /></button>
+      <span className="zine-period-label" aria-live="polite">{period.label}</span>
+      <button className="zine-icon-button" type="button" aria-label={`${periodModes[period.mode]} successivo`}
+        disabled={period.current} onClick={() => selectPeriod(1)}><ChevronRight size={18} /></button>
+    </div>
   </div>;
 }
