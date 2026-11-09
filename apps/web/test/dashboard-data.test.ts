@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { loadDashboard } from "../src/features/dashboard/dashboard-data";
 import { dashboardPeriod, money, parseCents, todayInRome } from "../src/features/dashboard/dashboard-model";
 
-const period = dashboardPeriod("2026-10", "2026-11-08");
+const period = dashboardPeriod("month", "2026-10-15", "2026-11-08");
 const id = "00000000-0000-4000-8000-000000000001";
 const row = { id, transaction_date: "2026-10-31", type: "income", amount: "0.01", category: "salary",
   from_account_id: null, to_account_id: id, voided: false, ledger_version: 1 };
@@ -59,8 +59,8 @@ describe("date e importi del ledger", () => {
   it("usa la data civile di Roma e rispetta il termine del mese selezionato", () => {
     const today = todayInRome(new Date("2026-10-31T23:30:00Z"));
     expect(today).toBe("2026-11-01");
-    expect(dashboardPeriod("2026-11", today).to).toBe(today);
-    expect(dashboardPeriod("2024-02", today).to).toBe("2024-02-29");
+    expect(dashboardPeriod("month", today, today).to).toBe(today);
+    expect(dashboardPeriod("month", "2024-02-10", today).to).toBe("2024-02-29");
   });
 
   it("mantiene i centesimi oltre la precisione di Number e conserva il segno", () => {

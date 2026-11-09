@@ -3,10 +3,14 @@ import { ArrowDownLeft, ArrowUpRight, ChartNoAxesCombined, ChevronLeft, ChevronR
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { Brand } from "../../components/Brand";
 import { CategoryChart, SpendingChart } from "./Charts";
+import { AccountLogo } from "./AccountLogo";
 import { Movements } from "./Movements";
 import { useAuth } from "../../auth/AuthProvider";
 import { DashboardAccessError, loadDashboard } from "./dashboard-data";
-import { dashboardPeriod, formatDay, money, shiftMonth, statistics, todayInRome, type Period } from "./dashboard-model";
+import {
+  dashboardPeriod, firstDate, formatDay, money, periodModes, shiftPeriod, spendingHeadline,
+  statistics, todayInRome, type Period, type PeriodMode,
+} from "./dashboard-model";
 
 const navigation = [
   { id: "dashboard", label: "Panoramica", Icon: LayoutDashboard },
@@ -15,8 +19,13 @@ const navigation = [
   { id: "budget", label: "Budget", Icon: ShieldCheck },
   { id: "conti", label: "Conti", Icon: Wallet },
 ] as const;
+const modeIds = Object.keys(periodModes) as PeriodMode[];
+// Aggettivi per le etichette di entrate/uscite e dell'intestazione; la copy definitiva è un passo successivo (Zine).
+const flowAdjective: Record<PeriodMode, string> = { year: "annue", month: "mensili", week: "settimanali", day: "del giorno" };
+const periodAdjective: Record<PeriodMode, string> = { year: "annuale", month: "mensile", week: "settimanale", day: "giornaliero" };
 
 type ReadAccess = { client: SupabaseClient; sessionSignal: AbortSignal };
+type Progress = { pages: number; entries: number };
 type LoadState = { status: "loading" | "error" | "denied" } |
   { status: "ready"; data: Awaited<ReturnType<typeof loadDashboard>> };
 
@@ -24,12 +33,16 @@ function DashboardData({ client, sessionSignal, period }: ReadAccess & { period:
   const { retry } = useAuth();
   const [attempt, setAttempt] = useState(0);
   const [loaded, setLoaded] = useState<{ scope: AbortSignal; state: LoadState }>();
+  const [progress, setProgress] = useState<Progress>();
   const state: LoadState = loaded?.scope === sessionSignal ? loaded.state : { status: "loading" };
 
   useEffect(() => {
     const request = new AbortController();
     const signal = AbortSignal.any([sessionSignal, request.signal]);
-    void loadDashboard(client, period, signal).then(data => {
+    setProgress(undefined);
+    void loadDashboard(client, period, signal, (pages, entries) => {
+      if (!signal.aborted) setProgress({ pages, entries });
+    }).then(data => {
       if (!signal.aborted) setLoaded({ scope: sessionSignal, state: { status: "ready", data } });
     }).catch((error: unknown) => {
       if (signal.aborted) return;
@@ -40,7 +53,9 @@ function DashboardData({ client, sessionSignal, period }: ReadAccess & { period:
   }, [attempt, client, period, sessionSignal]);
 
   if (sessionSignal.aborted) return null;
-  if (state.status === "loading") return <section className="glass dashboard-state" role="status" aria-busy="true">Caricamento dei dati in corso…</section>;
+  if (state.status === "loading") return <section className="glass dashboard-state" role="status" aria-busy="true">
+    Caricamento dei dati in corso{progress && progress.pages > 1 ? ` (movimenti letti: ${progress.entries})` : "…"}
+  </section>;
   if (state.status !== "ready") return <section className="glass dashboard-state">
     <p role="alert">{state.status === "denied" ? "Accesso ai dati non autorizzato o sessione scaduta." : "Impossibile caricare i dati del periodo."}</p>
     {state.status === "denied" ? <button className="text-button" onClick={retry}>Verifica la sessione</button> :
@@ -54,6 +69,7 @@ function DashboardData({ client, sessionSignal, period }: ReadAccess & { period:
   const hasCompleteBalance = accounts.length > 0 && accounts.every(account => account.cents !== null);
   const balance = hasCompleteBalance ? money(accounts.reduce((sum, account) => sum + (account.cents ?? 0n), 0n)) : "—";
   return <>
+    <p className="dashboard-headline">{spendingHeadline(period, totals.expenses)}</p>
     <section className="summary-grid" aria-label="Riepilogo finanziario">
       <article className="glass summary-card summary-card-primary">
         <div className="summary-icon mint-icon"><Coins size={25} aria-hidden="true" /></div>
@@ -61,11 +77,11 @@ function DashboardData({ client, sessionSignal, period }: ReadAccess & { period:
       </article>
       <article className="glass summary-card">
         <div className="summary-icon mint-icon"><ArrowDownLeft size={27} aria-hidden="true" /></div>
-        <div className="summary-body"><h2>Entrate mensili</h2><strong>{money(totals.income)}</strong><p>Movimenti contabilizzati</p></div>
+        <div className="summary-body"><h2>Entrate {flowAdjective[period.mode]}</h2><strong>{money(totals.income)}</strong><p>Movimenti contabilizzati</p></div>
       </article>
       <article className="glass summary-card">
         <div className="summary-icon coral-icon"><ArrowUpRight size={27} aria-hidden="true" /></div>
-        <div className="summary-body"><h2>Uscite mensili</h2><strong>{money(totals.expenses)}</strong><p>Movimenti contabilizzati</p></div>
+        <div className="summary-body"><h2>Uscite {flowAdjective[period.mode]}</h2><strong>{money(totals.expenses)}</strong><p>Movimenti contabilizzati</p></div>
       </article>
     </section>
     <div className="detail-grid">
@@ -74,7 +90,7 @@ function DashboardData({ client, sessionSignal, period }: ReadAccess & { period:
         <div className="panel-heading"><h2 id="accounts-title">Conti</h2><span className="quiet-label">{accounts.length} {accounts.length === 1 ? "conto" : "conti"}</span></div>
         {accounts.length === 0 ? <p className="quiet-label">Nessun conto disponibile.</p> :
           <div className="accounts-list">{accounts.map(account => <div className="account-row" key={account.id}>
-            <span className="account-logo" aria-hidden="true"><Wallet size={23} /></span>
+            <AccountLogo name={account.name} />
             <div className="account-info"><h3>{account.name}</h3>{!account.active && <p>Conto inattivo</p>}</div>
             <strong>{account.cents !== null ? money(account.cents) : account.status === "before_opening" ? "Prima dell’apertura" : "Saldo non configurato"}</strong>
           </div>)}</div>}
@@ -87,10 +103,9 @@ function DashboardData({ client, sessionSignal, period }: ReadAccess & { period:
 export function Dashboard({ client, sessionSignal }: ReadAccess) {
   const { signOut } = useAuth();
   const today = todayInRome();
-  const currentMonth = today.slice(0, 7);
-  const [period, setPeriod] = useState(() => dashboardPeriod(currentMonth, today));
-  const month = period.from.slice(0, 7);
-  const selectMonth = (offset: number) => setPeriod(dashboardPeriod(shiftMonth(month, offset), today));
+  const [period, setPeriod] = useState(() => dashboardPeriod("month", today, today));
+  const selectPeriod = (offset: number) => setPeriod(dashboardPeriod(period.mode, shiftPeriod(period.mode, period.from, offset), today));
+  const selectMode = (mode: PeriodMode) => { if (mode !== period.mode) setPeriod(dashboardPeriod(mode, today, today)); };
   const [menuOpen, setMenuOpen] = useState(false);
   const menuButton = useRef<HTMLButtonElement>(null);
   const [active, setActive] = useState("dashboard");
@@ -120,14 +135,20 @@ export function Dashboard({ client, sessionSignal }: ReadAccess) {
     </aside>
     <main className="dashboard-main" id="contenuto" tabIndex={-1}>
       <header className="dashboard-header">
-        <div><p className="eyebrow">Riepilogo mensile</p><h1>Panoramica</h1></div>
-        <div className="header-tools date-chip" role="group" aria-label="Periodo del riepilogo">
-          <button className="icon-button" type="button" aria-label="Mese precedente" disabled={month <= "0001-01"} onClick={() => selectMonth(-1)}><ChevronLeft size={16} /></button>
-          <span aria-live="polite">{period.label}</span>
-          <button className="icon-button" type="button" aria-label="Mese successivo" disabled={month >= currentMonth} onClick={() => selectMonth(1)}><ChevronRight size={16} /></button>
+        <div><p className="eyebrow">Riepilogo {periodAdjective[period.mode]}</p><h1>Panoramica</h1></div>
+        <div className="header-tools">
+          <div className="view-modes" role="group" aria-label="Scala temporale">
+            {modeIds.map(mode => <button key={mode} type="button" className="text-button" aria-pressed={period.mode === mode}
+              onClick={() => selectMode(mode)}>{periodModes[mode]}</button>)}
+          </div>
+          <div className="date-chip" role="group" aria-label="Periodo del riepilogo">
+            <button className="icon-button" type="button" aria-label={`${periodModes[period.mode]} precedente`} disabled={period.from <= firstDate} onClick={() => selectPeriod(-1)}><ChevronLeft size={16} /></button>
+            <span aria-live="polite">{period.label}</span>
+            <button className="icon-button" type="button" aria-label={`${periodModes[period.mode]} successivo`} disabled={period.current} onClick={() => selectPeriod(1)}><ChevronRight size={16} /></button>
+          </div>
         </div>
       </header>
-      <DashboardData key={period.to} client={client} sessionSignal={sessionSignal} period={period} />
+      <DashboardData key={`${period.mode}:${period.from}:${period.to}`} client={client} sessionSignal={sessionSignal} period={period} />
       <footer className="dashboard-footer"><span>FinanceTracker</span><button className="logout-button" type="button" onClick={() => { void signOut(); }}>Esci<LogOut size={14} aria-hidden="true" /></button></footer>
     </main>
   </div>;

@@ -1,28 +1,32 @@
-import { formatDay, labelForCategory, money, type Period, type statistics } from "./dashboard-model";
+import { labelForCategory, money, type Period, type statistics } from "./dashboard-model";
 
 type Statistics = ReturnType<typeof statistics>;
 const colors = ["#76c8ab", "#9ab9d2", "#dfb68e", "#b6a4cc", "#e3a99d", "#bac787"];
 
 export function SpendingChart({ totals, period }: { totals: Statistics; period: Period }) {
-  const { expenses, cumulative } = totals;
-  const x = (day: number) => 72 + 382 * day / cumulative.length;
+  const { expenses, buckets } = totals;
+  let running = 0n;
+  const cumulative = buckets.map(bucket => running += bucket.expenses);
+  const n = buckets.length;
+  const x = (index: number) => 72 + 382 * (index + 1) / n;
   const y = (amount: bigint) => 200 - Number(amount * 18_000n / expenses) / 100;
-  const date = (day: number) => period.from.slice(0, 8) + String(day).padStart(2, "0");
-  const ticks = [...new Set([1, Math.ceil(cumulative.length / 2), cumulative.length])];
+  const ticks = [...new Set([0, Math.floor((n - 1) / 2), n - 1])];
+  const periodNoun = period.mode === "year" ? "dall'inizio dell'anno" : period.mode === "month" ? "da inizio mese"
+    : period.mode === "week" ? "da inizio settimana" : "oggi";
 
   return <section className="glass chart-panel" id="analisi" aria-labelledby="spending-title">
     <div className="panel-heading"><h2 id="spending-title">Andamento delle spese</h2><span className="period-tag">{period.label}</span></div>
     {expenses === 0n ? <p className="quiet-label">Nessuna spesa contabilizzata nel periodo.</p> : <>
-      <div className="chart-summary"><strong>{money(expenses)}</strong><span>Spese da inizio mese</span></div>
+      <div className="chart-summary"><strong>{money(expenses)}</strong><span>Spese {periodNoun}</span></div>
       <svg className="spending-chart" viewBox="0 0 480 232" role="img" aria-labelledby="spending-svg-title spending-svg-description">
         <title id="spending-svg-title">Andamento delle spese · {period.label}</title>
-        <desc id="spending-svg-description">{ticks.map(day => `${formatDay(date(day))} · ${money(cumulative[day - 1])}`).join(". ")}</desc>
+        <desc id="spending-svg-description">{ticks.map(i => `${buckets[i].label} · ${money(cumulative[i])}`).join(". ")}</desc>
         <g className="chart-grid"><path d="M72 20H454M72 65H454M72 110H454M72 155H454M72 200H454" /></g>
         <g className="chart-labels">
           <text x="0" y="24">{money(expenses)}</text><text x="0" y="204">{money(0n)}</text>
-          {ticks.map(day => <text key={day} x={x(day)} y="225" textAnchor="end">{formatDay(date(day))}</text>)}
+          {ticks.map(i => <text key={i} x={x(i)} y="225" textAnchor="end">{buckets[i].label}</text>)}
         </g>
-        <polyline className="spending-line" points={[`${x(0)},200`, ...cumulative.map((amount, index) => `${x(index + 1)},${y(amount)}`)].join(" ")} fill="none" strokeWidth="2" strokeLinejoin="round" />
+        <polyline className="spending-line" points={[`${x(-1)},200`, ...cumulative.map((amount, index) => `${x(index)},${y(amount)}`)].join(" ")} fill="none" strokeWidth="2" strokeLinejoin="round" />
       </svg>
     </>}
     <p className="panel-footnote">Trasferimenti e movimenti annullati esclusi</p>

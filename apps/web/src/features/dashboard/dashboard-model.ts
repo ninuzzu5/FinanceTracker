@@ -15,6 +15,8 @@ export type Movement = {
 
 const currencyFormat = new Intl.NumberFormat("it-IT", { style: "currency", currency: "EUR" });
 const dayFormat = new Intl.DateTimeFormat("it-IT", { timeZone: "UTC", day: "numeric", month: "short", year: "numeric" });
+const shortDay = new Intl.DateTimeFormat("it-IT", { timeZone: "UTC", day: "numeric", month: "short" });
+const shortMonth = new Intl.DateTimeFormat("it-IT", { timeZone: "UTC", month: "short" });
 const monthFormat = new Intl.DateTimeFormat("it-IT", { timeZone: "UTC", month: "long", year: "numeric" });
 const romeDateFormat = new Intl.DateTimeFormat("sv-SE", { timeZone: "Europe/Rome", year: "numeric", month: "2-digit", day: "2-digit" });
 
@@ -34,18 +36,48 @@ export function money(cents: bigint): string {
 export const formatDay = (date: string) => dayFormat.format(new Date(date));
 export const todayInRome = (now = new Date()) => romeDateFormat.format(now);
 
-export function shiftMonth(month: string, offset: number): string {
-  const date = new Date(`${month}-01`);
-  date.setUTCMonth(date.getUTCMonth() + offset);
-  return date.toISOString().slice(0, 7);
+export const periodModes = { year: "Anno", month: "Mese", week: "Settimana", day: "Giorno" } as const;
+export type PeriodMode = keyof typeof periodModes;
+
+// Limite di navigazione all'indietro: non c'è un inizio noto del ledger, quindi il
+// selettore blocca "precedente" solo a una data sentinella assurda (anno 1), per evitare
+// una scorsa infinita nel passato senza inventare un vincolo contabile che non esiste.
+export const firstDate = "0001-01-01";
+
+// Le date civili sono calendario puro (Europe/Rome), non un istante: l'aritmetica
+// resta in UTC su stringhe YYYY-MM-DD per non dipendere dall'ora legale locale.
+function shiftDays(day: string, offset: number): string {
+  const date = new Date(day);
+  date.setUTCDate(date.getUTCDate() + offset);
+  return date.toISOString().slice(0, 10);
 }
 
-export function dashboardPeriod(month: string, today: string) {
-  const from = `${month}-01`;
-  const end = new Date(`${shiftMonth(month, 1)}-01`);
-  end.setUTCDate(0);
-  const to = month === today.slice(0, 7) ? today : end.toISOString().slice(0, 10);
-  return { from, to, label: monthFormat.format(new Date(from)) };
+function isoWeekStart(day: string): string {
+  const date = new Date(day);
+  return shiftDays(day, -((date.getUTCDay() + 6) % 7));
+}
+
+export function shiftPeriod(mode: PeriodMode, from: string, offset: number): string {
+  if (mode === "day") return shiftDays(from, offset);
+  if (mode === "week") return shiftDays(from, offset * 7);
+  const date = new Date(from);
+  date.setUTCMonth(date.getUTCMonth() + offset * (mode === "year" ? 12 : 1));
+  return date.toISOString().slice(0, 10);
+}
+
+export function dashboardPeriod(mode: PeriodMode, anchor: string, today: string) {
+  const day = anchor > today ? today : anchor;
+  const from = mode === "year" ? `${day.slice(0, 4)}-01-01`
+    : mode === "month" ? `${day.slice(0, 7)}-01`
+    : mode === "week" ? isoWeekStart(day)
+    : day;
+  const periodEnd = shiftDays(shiftPeriod(mode, from, 1), -1);
+  const to = periodEnd < today ? periodEnd : today;
+  const label = mode === "year" ? from.slice(0, 4)
+    : mode === "month" ? monthFormat.format(new Date(from))
+    : mode === "week" ? `${shortDay.format(new Date(from))} – ${formatDay(to)}`
+    : formatDay(from);
+  return { mode, from, to, label, current: to === today };
 }
 export type Period = ReturnType<typeof dashboardPeriod>;
 
@@ -57,23 +89,39 @@ export function labelForCategory(category: string | null): string {
 export function statistics(movements: readonly Movement[], period: Period) {
   let income = 0n;
   let expenses = 0n;
-  const byDay = Array<bigint>(Number(period.to.slice(-2))).fill(0n);
+  // Nella vista Anno i bucket sono mensili, altrimenti giornalieri: evita centinaia di
+  // colonne vuote e tiene i grafici leggibili qualunque sia l'ampiezza del periodo.
+  const byMonth = period.mode === "year";
+  const bucketKey = (day: string) => byMonth ? day.slice(0, 7) : day;
+  const buckets = new Map<string, { date: string; label: string; income: bigint; expenses: bigint }>();
+  for (let date = period.from; date <= period.to; date = shiftPeriod(byMonth ? "month" : "day", date, 1)) {
+    buckets.set(bucketKey(date), { date, label: (byMonth ? shortMonth : shortDay).format(new Date(date)), income: 0n, expenses: 0n });
+  }
   const categories = new Map<string | null, bigint>();
   for (const movement of movements) {
     if (movement.voided || movement.type === "transfer") continue;
+    const bucket = buckets.get(bucketKey(movement.date));
     if (movement.type === "income") {
       income += movement.cents;
+      if (bucket) bucket.income += movement.cents;
     } else {
       expenses += movement.cents;
-      byDay[Number(movement.date.slice(-2)) - 1] += movement.cents;
+      if (bucket) bucket.expenses += movement.cents;
       categories.set(movement.category, (categories.get(movement.category) ?? 0n) + movement.cents);
     }
   }
-  let running = 0n;
   return {
     income,
     expenses,
-    cumulative: byDay.map(cents => running += cents),
+    buckets: [...buckets.values()],
     categories: [...categories].sort(([, left], [, right]) => left > right ? -1 : left < right ? 1 : 0),
   };
+}
+
+export function spendingHeadline(period: Period, expenses: bigint): string {
+  const when = period.mode === "year" ? `nel ${period.label}`
+    : period.mode === "month" ? `a ${period.label}`
+    : period.mode === "week" ? (period.current ? "in questa settimana" : `nella settimana del ${period.label}`)
+    : period.current ? "oggi" : `il ${period.label}`;
+  return `Hai speso ${money(expenses)} ${when}`;
 }

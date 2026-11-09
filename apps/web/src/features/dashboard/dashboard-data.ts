@@ -32,10 +32,11 @@ async function balances(client: SupabaseClient, date: string, signal: AbortSigna
   });
 }
 
-async function movements(client: SupabaseClient, period: Period, signal: AbortSignal): Promise<Movement[]> {
+async function movements(client: SupabaseClient, period: Period, signal: AbortSignal, onPage?: (pages: number, entries: number) => void): Promise<Movement[]> {
   const all: Movement[] = [];
   const seen = new Set<string>();
   let previous: Movement | undefined;
+  let pages = 0;
   for (;;) {
     signal.throwIfAborted();
     const result = await client.rpc("get_dashboard_movements", {
@@ -44,8 +45,9 @@ async function movements(client: SupabaseClient, period: Period, signal: AbortSi
     }, { get: true }).abortSignal(signal);
     signal.throwIfAborted();
     const page = responseRows(result);
+    pages += 1;
     // Una pagina corta può dipendere dal limite della Data API. Solo una pagina vuota chiude la lettura.
-    if (page.length === 0) return all;
+    if (page.length === 0) { onPage?.(pages, all.length); return all; }
     for (const row of page) {
       const { id, type, transaction_date: date, category, from_account_id: from, to_account_id: to, voided } = row;
       if (typeof id !== "string" || !uuid.test(id) || seen.has(id) || typeof date !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(date)
@@ -58,12 +60,15 @@ async function movements(client: SupabaseClient, period: Period, signal: AbortSi
       previous = { id, type, date, category, from, to, voided, cents };
       all.push(previous);
     }
+    onPage?.(pages, all.length);
   }
 }
 
-export async function loadDashboard(client: SupabaseClient, period: Period, signal: AbortSignal) {
+export async function loadDashboard(
+  client: SupabaseClient, period: Period, signal: AbortSignal, onPage?: (pages: number, entries: number) => void,
+) {
   signal.throwIfAborted();
-  const [accounts, entries] = await Promise.all([balances(client, period.to, signal), movements(client, period, signal)]);
+  const [accounts, entries] = await Promise.all([balances(client, period.to, signal), movements(client, period, signal, onPage)]);
   signal.throwIfAborted();
   return { accounts, entries };
 }
