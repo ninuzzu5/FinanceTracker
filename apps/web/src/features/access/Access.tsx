@@ -1,6 +1,6 @@
 import { useRef, useState, type FormEvent } from "react";
-import { ArrowRight, Eye, EyeOff, LockKeyhole, Mail, ShieldCheck } from "lucide-react";
-import { Brand } from "../../components/Brand";
+import { ArrowRight, Eye, EyeOff, LockKeyhole, Mail } from "lucide-react";
+import { Mascot } from "../dashboard/Mascot";
 import { useAuth } from "../../auth/AuthProvider";
 
 export function Access() {
@@ -38,20 +38,30 @@ export function Access() {
   };
   const message = !configured ? "Accesso non configurato. Imposta URL, chiave pubblica e identificativo dell’account web dedicato."
     : notice || (state.status === "anonymous" ? state.message : "");
-  return <main className="access-page">
-    <section className="access-panel glass" aria-labelledby="access-title">
-      <Brand large />
-      <h1 id="access-title" className="access-tagline">Accesso</h1>
-      <form noValidate onSubmit={event => { void submit(event); }} aria-busy={pending}>
-        <label htmlFor="email">Email</label>
-        <div className="input-wrap"><Mail size={20} aria-hidden="true" /><input id="email" name="email" type="email" placeholder="nome@esempio.it" autoComplete="username" required disabled={pending || !configured} /></div>
-        <label htmlFor="password">Password</label>
-        <div className="input-wrap"><LockKeyhole size={20} aria-hidden="true" /><input id="password" name="password" type={visible ? "text" : "password"} placeholder="Inserisci la tua password" autoComplete="current-password" required disabled={pending || !configured} /><button className="icon-button" type="button" aria-label={visible ? "Nascondi password" : "Mostra password"} aria-pressed={visible} disabled={pending || !configured} onClick={() => setVisible(!visible)}>{visible ? <EyeOff size={20} /> : <Eye size={20} />}</button></div>
-        <div className="access-options"><button type="button" className="text-button" disabled title="Recupero password non ancora disponibile">Password dimenticata? Non disponibile</button></div>
-        <button className="primary-button" type="submit" disabled={pending || !configured}>{pending ? "Accesso in corso…" : "Accedi"} <ArrowRight size={21} aria-hidden="true" /></button>
-        <p className="access-notice" role="status">{message || "Accedi con il tuo account autorizzato."}</p>
-      </form>
-      <div className="access-footer"><ShieldCheck size={23} aria-hidden="true" /><span>Accesso con Supabase e verifica in due passaggi.</span></div>
+  return <main className="zine-page zine-access-page">
+    <section className="zine-card zine-access-card" style={{ "--tilt": "-0.6deg", "--tape": "#FFE14Dcc" } as React.CSSProperties} aria-labelledby="access-title">
+      <div className="zine-card-body">
+        <div className="zine-access-head">
+          <h1 id="access-title" className="zine-heading" style={{ fontSize: 40, margin: 0 }}><span className="zine-highlight">Accedi</span></h1>
+          <Mascot state="happy" size={64} />
+        </div>
+        <p className="zine-access-note">Area riservata: solo l’account web dedicato.</p>
+        <form noValidate onSubmit={event => { void submit(event); }} aria-busy={pending}>
+          <label className="zine-field" htmlFor="email"><span className="zine-label">Email</span>
+            <div className="zine-input-wrap"><input className="zine-input" id="email" name="email" type="email" placeholder="nome@esempio.it" autoComplete="username" required disabled={pending || !configured} />
+              <Mail size={18} aria-hidden="true" className="zine-input-eye" style={{ right: "auto", left: 14, pointerEvents: "none" }} /></div>
+          </label>
+          <label className="zine-field" htmlFor="password"><span className="zine-label">Password</span>
+            <div className="zine-input-wrap"><input className="zine-input" id="password" name="password" type={visible ? "text" : "password"} placeholder="la tua password" autoComplete="current-password" required disabled={pending || !configured} />
+              <LockKeyhole size={18} aria-hidden="true" className="zine-input-eye" style={{ right: "auto", left: 14, pointerEvents: "none" }} />
+              <button className="zine-input-eye" type="button" aria-label={visible ? "Nascondi password" : "Mostra password"} aria-pressed={visible} disabled={pending || !configured} onClick={() => setVisible(!visible)}>{visible ? <EyeOff size={18} /> : <Eye size={18} />}</button></div>
+          </label>
+          <p className="zine-access-recovery"><button type="button" className="zine-chip zine-chip-sm" disabled title="Recupero password non ancora disponibile">Password dimenticata? Non disponibile</button></p>
+          <p style={{ margin: "22px 0 0" }}><button className="zine-button zine-button-wide" type="submit" disabled={pending || !configured}>{pending ? "Accesso in corso…" : "Accedi"} <ArrowRight size={19} aria-hidden="true" /></button></p>
+          <p className="zine-access-notice" role="status">{message || "Accedi con il tuo account autorizzato."}</p>
+        </form>
+        <p className="zine-access-note">Niente registrazione né recupero password: l’account si crea dalla console.</p>
+      </div>
     </section>
   </main>;
 }

@@ -1,28 +1,28 @@
-import { useEffect, useRef, useState } from "react";
-import { ArrowDownLeft, ArrowUpRight, ChartNoAxesCombined, ChevronLeft, ChevronRight, Coins, LayoutDashboard, ListFilter, LogOut, Menu, ShieldCheck, Wallet, X } from "lucide-react";
+import { useEffect, useState } from "react";
+import { ChevronLeft, ChevronRight, LogOut } from "lucide-react";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { Brand } from "../../components/Brand";
 import { CategoryChart, SpendingChart } from "./Charts";
+import { Calendar } from "./Calendar";
+import { TopSpending } from "./TopSpending";
 import { AccountLogo } from "./AccountLogo";
+import { Mascot } from "./Mascot";
 import { Movements } from "./Movements";
 import { useAuth } from "../../auth/AuthProvider";
 import { DashboardAccessError, loadDashboard } from "./dashboard-data";
 import {
-  dashboardPeriod, firstDate, formatDay, money, periodModes, shiftPeriod, spendingHeadline,
-  statistics, todayInRome, type Period, type PeriodMode,
+  amountSizeClass, dashboardPeriod, firstDate, formatDay, money, periodModes, shiftPeriod, statistics,
+  titlePieces, todayInRome, type Period, type PeriodMode,
 } from "./dashboard-model";
 
 const navigation = [
-  { id: "dashboard", label: "Panoramica", Icon: LayoutDashboard },
-  { id: "movimenti", label: "Movimenti", Icon: ListFilter },
-  { id: "analisi", label: "Analisi", Icon: ChartNoAxesCombined },
-  { id: "budget", label: "Budget", Icon: ShieldCheck },
-  { id: "conti", label: "Conti", Icon: Wallet },
+  { id: "dashboard", label: "Panoramica" },
+  { id: "movimenti", label: "Movimenti" },
+  { id: "analisi", label: "Analisi" },
+  { id: "conti", label: "Conti" },
 ] as const;
 const modeIds = Object.keys(periodModes) as PeriodMode[];
-// Aggettivi per le etichette di entrate/uscite e dell'intestazione; la copy definitiva è un passo successivo (Zine).
-const flowAdjective: Record<PeriodMode, string> = { year: "annue", month: "mensili", week: "settimanali", day: "del giorno" };
-const periodAdjective: Record<PeriodMode, string> = { year: "annuale", month: "mensile", week: "settimanale", day: "giornaliero" };
+const flowAdjective: Record<PeriodMode, string> = { year: "dell'anno", month: "del mese", week: "della settimana", day: "del giorno" };
 
 type ReadAccess = { client: SupabaseClient; sessionSignal: AbortSignal };
 type Progress = { pages: number; entries: number };
@@ -53,103 +53,168 @@ function DashboardData({ client, sessionSignal, period }: ReadAccess & { period:
   }, [attempt, client, period, sessionSignal]);
 
   if (sessionSignal.aborted) return null;
-  if (state.status === "loading") return <section className="glass dashboard-state" role="status" aria-busy="true">
-    Caricamento dei dati in corso{progress && progress.pages > 1 ? ` (movimenti letti: ${progress.entries})` : "…"}
-  </section>;
-  if (state.status !== "ready") return <section className="glass dashboard-state">
-    <p role="alert">{state.status === "denied" ? "Accesso ai dati non autorizzato o sessione scaduta." : "Impossibile caricare i dati del periodo."}</p>
-    {state.status === "denied" ? <button className="text-button" onClick={retry}>Verifica la sessione</button> :
-      <button className="text-button" onClick={() => { setLoaded(undefined); setAttempt(attempt + 1); }}>Riprova</button>}
+
+  if (state.status === "loading") return <section className="zine-card" style={{ "--tape": "#FFE14Dcc" } as React.CSSProperties}>
+    <div className="zine-card-body zine-state" role="status" aria-busy="true">
+      <div className="zine-state-text">
+        <h2 className="zine-heading zine-heading-md"><span className="zine-highlight">Caricamento</span></h2>
+        <p style={{ margin: "0 0 14px" }}>Caricamento dei dati in corso{progress && progress.pages > 1 ? ` (movimenti letti: ${progress.entries})` : "…"}</p>
+        <div className="zine-progress" />
+      </div>
+      <Mascot state="flip" />
+    </div>
   </section>;
 
+  if (state.status !== "ready") {
+    const denied = state.status === "denied";
+    return <section className="zine-card" style={{ "--tape": denied ? "#E63946aa" : "#1D4ED8aa" } as React.CSSProperties}>
+      <div className="zine-card-body zine-state">
+        <div className="zine-state-text">
+          <h2 className="zine-heading zine-heading-md"><span className="zine-highlight">{denied ? "Accesso negato" : "Errore"}</span></h2>
+          <p role="alert" style={{ margin: "0 0 16px" }}>{denied ? "Accesso ai dati non autorizzato o sessione scaduta." : "Impossibile caricare i dati del periodo."}</p>
+          {denied ? <button className="zine-button zine-button-alt" onClick={retry}>Verifica la sessione</button>
+            : <button className="zine-button" onClick={() => { setLoaded(undefined); setAttempt(attempt + 1); }}>Riprova</button>}
+        </div>
+        <Mascot state={denied ? "lock" : "dead"} />
+      </div>
+    </section>;
+  }
+
   const { accounts, entries } = state.data;
-  if (!accounts.length && !entries.length) return <section className="glass dashboard-state" role="status">Nessun dato disponibile per il periodo.</section>;
+  if (!accounts.length && !entries.length) return <section className="zine-card" style={{ "--tape": "#E63946aa", "--card-bg": "var(--yellow)" } as React.CSSProperties}>
+    <div className="zine-card-body zine-state">
+      <div className="zine-state-text">
+        <span className="zine-stamp">NESSUN DATO</span>
+        <h2 className="zine-heading zine-heading-md"><span className="zine-highlight">Nessun dato</span></h2>
+        <p role="status" style={{ margin: 0 }}>Nessun dato disponibile per il periodo.</p>
+      </div>
+      <Mascot state="sleep" />
+    </div>
+  </section>;
 
   const totals = statistics(entries, period);
   const hasCompleteBalance = accounts.length > 0 && accounts.every(account => account.cents !== null);
-  const balance = hasCompleteBalance ? money(accounts.reduce((sum, account) => sum + (account.cents ?? 0n), 0n)) : "—";
+  const totalCents = accounts.reduce((sum, account) => sum + (account.cents ?? 0n), 0n);
+  const inRed = hasCompleteBalance && totalCents < 0n;
+  const balance = hasCompleteBalance ? money(totalCents) : "—";
+  const summaryTexts = [balance, money(totals.income), money(totals.expenses)];
+  const summarySize = amountSizeClass(summaryTexts);
+  const accountTexts = accounts.map(a => a.cents !== null ? money(a.cents) : "").filter(Boolean);
+  const accountSize = amountSizeClass(accountTexts);
+  const title = titlePieces(period, totals.expenses);
+
   return <>
-    <p className="dashboard-headline">{spendingHeadline(period, totals.expenses)}</p>
-    <section className="summary-grid" aria-label="Riepilogo finanziario">
-      <article className="glass summary-card summary-card-primary">
-        <div className="summary-icon mint-icon"><Coins size={25} aria-hidden="true" /></div>
-        <div className="summary-body"><h2>Saldo complessivo</h2><strong>{balance}</strong><p>{hasCompleteBalance ? `Al ${formatDay(period.to)}` : "Saldo complessivo non disponibile"}</p></div>
-      </article>
-      <article className="glass summary-card">
-        <div className="summary-icon mint-icon"><ArrowDownLeft size={27} aria-hidden="true" /></div>
-        <div className="summary-body"><h2>Entrate {flowAdjective[period.mode]}</h2><strong>{money(totals.income)}</strong><p>Movimenti contabilizzati</p></div>
-      </article>
-      <article className="glass summary-card">
-        <div className="summary-icon coral-icon"><ArrowUpRight size={27} aria-hidden="true" /></div>
-        <div className="summary-body"><h2>Uscite {flowAdjective[period.mode]}</h2><strong>{money(totals.expenses)}</strong><p>Movimenti contabilizzati</p></div>
-      </article>
-    </section>
-    <div className="detail-grid">
-      <SpendingChart totals={totals} period={period} /><CategoryChart totals={totals} period={period} />
-      <section className="glass accounts-panel" id="conti" aria-labelledby="accounts-title">
-        <div className="panel-heading"><h2 id="accounts-title">Conti</h2><span className="quiet-label">{accounts.length} {accounts.length === 1 ? "conto" : "conti"}</span></div>
-        {accounts.length === 0 ? <p className="quiet-label">Nessun conto disponibile.</p> :
-          <div className="accounts-list">{accounts.map(account => <div className="account-row" key={account.id}>
-            <AccountLogo name={account.name} />
-            <div className="account-info"><h3>{account.name}</h3>{!account.active && <p>Conto inattivo</p>}</div>
-            <strong>{account.cents !== null ? money(account.cents) : account.status === "before_opening" ? "Prima dell’apertura" : "Saldo non configurato"}</strong>
-          </div>)}</div>}
+    <h2 className="zine-title" aria-live="polite">
+      <span className="sr-only">{title.map(p => p.text).join(" ")}</span>
+      {title.map((piece, i) => <span key={i} aria-hidden="true" className="zine-title-piece"
+        style={{ background: piece.background, color: piece.color, transform: `rotate(${piece.angle}deg)` }}>{piece.text}</span>)}
+    </h2>
+    <section className="zine-grid zine-summary" aria-label="Riepilogo finanziario">
+      <section className="zine-card" style={{ "--tilt": "-0.5deg", "--card-bg": inRed ? "#FFC2C7" : "#8FE0A8" } as React.CSSProperties}>
+        <div className="zine-card-body">
+          <h2 className="zine-label">Saldo complessivo</h2>
+          <div className={`zine-amount ${summarySize} ${inRed ? "zine-negative" : ""}`}>{balance}</div>
+          <p className="zine-sub">{hasCompleteBalance ? `Al ${formatDay(period.to)}` : "Saldo complessivo non disponibile"}
+            {inRed && <span className="zine-chip-static" style={{ background: "#fff" }}>IN ROSSO</span>}</p>
+        </div>
       </section>
+      <section className="zine-card" style={{ "--tilt": "0.5deg" } as React.CSSProperties}>
+        <div className="zine-card-body">
+          <h2 className="zine-label">Entrate {flowAdjective[period.mode]}</h2>
+          <div className={`zine-amount ${summarySize}`}>{money(totals.income)}</div>
+          <p className="zine-sub">Movimenti contabilizzati</p>
+        </div>
+      </section>
+      <section className="zine-card" style={{ "--tilt": "-0.4deg", "--card-bg": "var(--yellow)" } as React.CSSProperties}>
+        <div className="zine-card-body">
+          <h2 className="zine-label">Uscite {flowAdjective[period.mode]}</h2>
+          <div className={`zine-amount ${summarySize}`}>{money(totals.expenses)}</div>
+          <p className="zine-sub">Movimenti contabilizzati</p>
+        </div>
+      </section>
+    </section>
+    <div className="zine-accounts">
+      <div className="zine-section-heading"><h2 className="zine-heading zine-heading-lg" id="conti"><span className="zine-highlight">Conti</span></h2>
+        <span className="zine-count">{accounts.length} {accounts.length === 1 ? "conto" : "conti"}</span></div>
+      {accounts.length === 0 ? <p className="zine-chart-note">Nessun conto disponibile.</p> : <div className="zine-grid">
+        {accounts.map((account, i) => <section className="zine-card zine-account-card" key={account.id} style={{ "--tilt": `${(i % 2 === 0 ? -1 : 1) * 0.4}deg` } as React.CSSProperties}>
+          <div className="zine-card-body">
+            <div className="zine-account-head"><AccountLogo name={account.name} />
+              {!account.active && <span className="zine-chip-static zine-inactive-chip">CONTO INATTIVO</span>}</div>
+            <div className={`zine-amount ${accountSize}`}>
+              {account.cents !== null ? money(account.cents) : account.status === "before_opening" ? "Prima dell'apertura" : "Saldo non configurato"}
+            </div>
+          </div>
+        </section>)}
+      </div>}
     </div>
-    <Movements accounts={accounts} entries={entries} period={period} />
+    <div className="zine-grid" id="analisi">
+      <SpendingChart totals={totals} period={period} />
+      <CategoryChart totals={totals} />
+    </div>
+    {(period.mode === "month" || period.mode === "week") && <div className="zine-grid">
+      {period.mode === "month" && <Calendar totals={totals} monthStart={period.from} today={period.to} />}
+      <TopSpending entries={entries} accounts={accounts} />
+    </div>}
+    <Movements accounts={accounts} entries={entries} />
   </>;
 }
 
 export function Dashboard({ client, sessionSignal }: ReadAccess) {
   const { signOut } = useAuth();
-  const today = todayInRome();
+  const [today, setToday] = useState(todayInRome);
   const [period, setPeriod] = useState(() => dashboardPeriod("month", today, today));
+
+  useEffect(() => {
+    const updateDate = () => setToday(todayInRome());
+    const timer = window.setInterval(updateDate, 60_000);
+    document.addEventListener("visibilitychange", updateDate);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", updateDate);
+    };
+  }, []);
+
   const selectPeriod = (offset: number) => setPeriod(dashboardPeriod(period.mode, shiftPeriod(period.mode, period.from, offset), today));
   const selectMode = (mode: PeriodMode) => { if (mode !== period.mode) setPeriod(dashboardPeriod(mode, today, today)); };
-  const [menuOpen, setMenuOpen] = useState(false);
-  const menuButton = useRef<HTMLButtonElement>(null);
-  const [active, setActive] = useState("dashboard");
-  useEffect(() => {
-    if (!menuOpen) return;
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        setMenuOpen(false);
-        menuButton.current?.focus();
-      }
-    };
-    window.addEventListener("keydown", closeOnEscape);
-    return () => window.removeEventListener("keydown", closeOnEscape);
-  }, [menuOpen]);
-  return <div className="dashboard-shell" id="dashboard">
+
+  return <div className="zine-page" id="dashboard">
     <a href="#contenuto" className="skip-link">Vai al contenuto principale</a>
-    <div className="mobile-bar"><Brand /><button ref={menuButton} type="button" className="icon-button" aria-label={menuOpen ? "Chiudi menu" : "Apri menu"} aria-expanded={menuOpen} aria-controls="sidebar" onClick={() => setMenuOpen(!menuOpen)}>{menuOpen ? <X /> : <Menu />}</button></div>
-    {menuOpen && <button className="menu-overlay" aria-label="Chiudi menu di navigazione" onClick={() => setMenuOpen(false)} />}
-    <aside className={`sidebar glass${menuOpen ? " sidebar-open" : ""}`} id="sidebar" aria-label="Navigazione principale">
-      <a href="/" className="brand-link" aria-label="FinanceTracker, panoramica"><Brand /></a>
-      <span className="sidebar-section-label">Navigazione</span>
-      <nav>{navigation.map(({ id, label, Icon }) => id === "budget" ? <div className="nav-unavailable" key={id}><button type="button" disabled title="Budget non disponibile" aria-describedby="budget-hint"><Icon size={20} />{label}</button><span id="budget-hint" className="sr-only">Budget non disponibile.</span></div> : <a className={`nav-link${active === id ? " active" : ""}`} href={`#${id}`} key={id} aria-current={active === id ? "location" : undefined} onClick={() => { setActive(id); setMenuOpen(false); }}><Icon size={20} aria-hidden="true" />{label}</a>)}</nav>
-      <div className="sidebar-bottom">
-        <button className="access-link logout-button" type="button" onClick={() => { void signOut(); }}><LogOut size={18} aria-hidden="true" />Esci</button>
-        <div className="sidebar-footer">FinanceTracker</div>
+    <div className="zine-wrap">
+      <div className="zine-topbar">
+        <a href="#dashboard" className="brand" aria-label="FinanceTracker, panoramica"><Brand /></a>
+        <nav className="zine-nav" aria-label="Navigazione principale">
+          {navigation.map(({ id, label }) => <a key={id} className="zine-chip" href={`#${id}`} aria-pressed={id === "dashboard" || undefined}>{label}</a>)}
+          <button className="zine-chip" disabled title="Budget non disponibile">Budget · presto</button>
+        </nav>
+        <button className="zine-chip" type="button" onClick={() => { void signOut(); }}><LogOut size={16} aria-hidden="true" />Esci</button>
       </div>
-    </aside>
-    <main className="dashboard-main" id="contenuto" tabIndex={-1}>
-      <header className="dashboard-header">
-        <div><p className="eyebrow">Riepilogo {periodAdjective[period.mode]}</p><h1>Panoramica</h1></div>
-        <div className="header-tools">
-          <div className="view-modes" role="group" aria-label="Scala temporale">
-            {modeIds.map(mode => <button key={mode} type="button" className="text-button" aria-pressed={period.mode === mode}
-              onClick={() => selectMode(mode)}>{periodModes[mode]}</button>)}
-          </div>
-          <div className="date-chip" role="group" aria-label="Periodo del riepilogo">
-            <button className="icon-button" type="button" aria-label={`${periodModes[period.mode]} precedente`} disabled={period.from <= firstDate} onClick={() => selectPeriod(-1)}><ChevronLeft size={16} /></button>
-            <span aria-live="polite">{period.label}</span>
-            <button className="icon-button" type="button" aria-label={`${periodModes[period.mode]} successivo`} disabled={period.current} onClick={() => selectPeriod(1)}><ChevronRight size={16} /></button>
-          </div>
-        </div>
-      </header>
-      <DashboardData key={`${period.mode}:${period.from}:${period.to}`} client={client} sessionSignal={sessionSignal} period={period} />
-      <footer className="dashboard-footer"><span>FinanceTracker</span><button className="logout-button" type="button" onClick={() => { void signOut(); }}>Esci<LogOut size={14} aria-hidden="true" /></button></footer>
-    </main>
+      <div className="zine-period-bar" role="group" aria-label="Scala temporale">
+        {modeIds.map(mode => <button key={mode} type="button" className="zine-chip" aria-pressed={period.mode === mode}
+          onClick={() => selectMode(mode)}>{periodModes[mode]}</button>)}
+      </div>
+      <main id="contenuto" tabIndex={-1}>
+        <h1 className="sr-only">Panoramica</h1>
+        <DashboardContent client={client} sessionSignal={sessionSignal} period={period} selectPeriod={selectPeriod} />
+      </main>
+      <footer className="zine-footer"><Mascot state="happy" size={44} /><span>FinanceTracker · dati dal bot Telegram · sola lettura</span></footer>
+    </div>
+  </div>;
+}
+
+function DashboardContent({ client, sessionSignal, period, selectPeriod }: ReadAccess & { period: Period; selectPeriod: (offset: number) => void }) {
+  return <div style={{ display: "flex", flexDirection: "column", gap: 34 }}>
+    <DashboardPeriodNav period={period} selectPeriod={selectPeriod} />
+    <DashboardData key={`${period.mode}:${period.from}:${period.to}`} client={client} sessionSignal={sessionSignal} period={period} />
+  </div>;
+}
+
+function DashboardPeriodNav({ period, selectPeriod }: { period: Period; selectPeriod: (offset: number) => void }) {
+  return <div className="zine-period-bar" role="group" aria-label="Navigazione del periodo">
+    <button className="zine-chip zine-period-nav" type="button" aria-label={`${periodModes[period.mode]} precedente`}
+      disabled={period.from <= firstDate} onClick={() => selectPeriod(-1)}><ChevronLeft size={18} /></button>
+    <span className="zine-period-label" aria-live="polite">{period.label}</span>
+    <button className="zine-chip zine-period-nav" type="button" aria-label={`${periodModes[period.mode]} successivo`}
+      disabled={period.current} onClick={() => selectPeriod(1)}><ChevronRight size={18} /></button>
   </div>;
 }

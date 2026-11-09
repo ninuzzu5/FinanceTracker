@@ -1,26 +1,37 @@
-/* Token condivisi: i componenti non dipendono dai colori del tema. */
+/* Font statici (nessuna richiesta esterna). Licenze in ./fonts/LICENZE.txt:
+   Inter, Bowlby One, Caveat = SIL OFL 1.1; Special Elite = Apache 2.0. */
+@font-face { font-family: "Inter"; font-style: normal; font-weight: 500; font-display: swap; src: url("./fonts/inter-latin-500-normal.woff2") format("woff2"); }
+@font-face { font-family: "Inter"; font-style: normal; font-weight: 700; font-display: swap; src: url("./fonts/inter-latin-700-normal.woff2") format("woff2"); }
+@font-face { font-family: "Inter"; font-style: normal; font-weight: 800; font-display: swap; src: url("./fonts/inter-latin-800-normal.woff2") format("woff2"); }
+@font-face { font-family: "Bowlby One"; font-style: normal; font-weight: 400; font-display: swap; src: url("./fonts/bowlby-one-latin-400-normal.woff2") format("woff2"); }
+@font-face { font-family: "Caveat"; font-style: normal; font-weight: 600; font-display: swap; src: url("./fonts/caveat-latin-600-normal.woff2") format("woff2"); }
+@font-face { font-family: "Caveat"; font-style: normal; font-weight: 700; font-display: swap; src: url("./fonts/caveat-latin-700-normal.woff2") format("woff2"); }
+@font-face { font-family: "Special Elite"; font-style: normal; font-weight: 400; font-display: swap; src: url("./fonts/special-elite-latin-400-normal.woff2") format("woff2"); }
+
+/* Token condivisi: carta, inchiostro, colori delle fette/schede (Specifiche.dc.html). */
 :root {
-  color-scheme: dark;
-  --color-background: #0b0e10;
-  --color-surface: rgba(26, 32, 33, .72);
-  --color-surface-raised: rgba(255, 255, 255, .035);
-  --color-text: #f2f5f4;
-  --color-muted: #a4afae;
-  --color-subtle: #8c9997;
-  --color-accent: #73dcb6;
-  --color-accent-strong: #40c99a;
-  --color-accent-tint: rgba(100, 213, 172, .09);
-  --color-on-accent: #0c3025;
-  --color-border: rgba(222, 244, 237, .105);
-  --color-border-highlight: rgba(234, 255, 248, .22);
-  --color-divider: rgba(220, 238, 233, .065);
-  --color-coral: #e0a69b;
-  --color-focus: #a3f0d2;
-  --surface-reflection: linear-gradient(135deg, rgba(255, 255, 255, .055), transparent 42%, rgba(255, 255, 255, .008) 75%);
-  --shadow-panel: 0 16px 40px -24px rgba(0, 0, 0, .8), 0 2px 6px rgba(0, 0, 0, .12), inset 0 1px 0 rgba(255, 255, 255, .07);
-  --shadow-hover: 0 22px 48px -24px rgba(0, 0, 0, .85), inset 0 1px 0 rgba(255, 255, 255, .12);
-  --radius-panel: 24px;
-  --radius-control: 12px;
+  color-scheme: light;
+  --paper: #EFE6D2;
+  --paper-dot: #0000001a;
+  --ink: #111111;
+  --yellow: #FFE14D;
+  --yellow-soft: #FFF3B0;
+  --red: #E63946;
+  --blue: #1D4ED8;
+  --teal: #2A9D8F;
+  --orange: #FF9F43;
+  --green: #8FE0A8;
+  --pink: #FF9FB2;
+  --azure: #9CC4FF;
+  --transfer-bg: #BFE3FF;
+  --stone: #BDB5A0;
+  --negative: #C1121F;
+  --positive: #0B7A57;
+  --white: #ffffff;
+  --radius: 0;
+  --border-width: 3px;
+  --shadow-hard: 4px 5px 0 #0004;
+  --focus-ring: #1D4ED8;
   --space-1: 4px;
   --space-2: 8px;
   --space-3: 12px;
@@ -28,16 +39,13 @@
   --space-5: 24px;
   --space-6: 32px;
   --space-7: 48px;
-  --text-caption: 12px;
-  --text-body: 14px;
-  --text-heading: 17px;
-  --chart-rent: #80cdb0;
-  --chart-groceries: #4b9e85;
-  --chart-food: #92b8a8;
-  --chart-transport: #83aabd;
-  --chart-subscriptions: #ac9cbe;
-  --chart-leisure: #677879;
+  --text-caption: 13px;
+  --text-body: 17px;
+  --text-heading: 22px;
+  --font-hand: "Caveat", cursive;
+  --font-display: "Bowlby One", sans-serif;
+  --font-body: "Special Elite", serif;
+  --font-amount: "Inter", sans-serif;
   --motion-duration: 180ms;
   --motion-easing: cubic-bezier(.2, .7, .3, 1);
-  --font-body: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", sans-serif;
 }

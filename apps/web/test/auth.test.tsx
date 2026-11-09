@@ -576,13 +576,13 @@ describe("dati della dashboard", () => {
     await screen.findByRole("table");
     const summary = screen.getByRole("region", { name: "Riepilogo finanziario" });
     expect(summary.textContent).toContain("-20,11");
-    expect(summary.textContent).toMatch(/Uscite mensili0,30/);
-    expect(summary.textContent).toMatch(/Entrate mensili1,05/);
+    expect(summary.textContent).toMatch(/Uscite del mese0,30/);
+    expect(summary.textContent).toMatch(/Entrate del mese1,05/);
     expect(screen.getAllByRole("row")).toHaveLength(6);
-    expect(screen.getByText("Annullato")).toBeTruthy();
+    expect(screen.getByText("ANNULLATO")).toBeTruthy();
     expect(screen.getByText("Trasferimento")).toBeTruthy();
-    expect(screen.getByText("Conto inattivo")).toBeTruthy();
-    expect(screen.getByRole("img", { name: /Andamento delle spese/ })).toBeTruthy();
+    expect(screen.getByText("CONTO INATTIVO")).toBeTruthy();
+    expect(screen.getByRole("img", { name: /Spese giorno per giorno/ })).toBeTruthy();
     expect(mock.rpc).toHaveBeenCalledWith("get_dashboard_movements", {
       p_from: expect.any(String), p_to: expect.any(String), p_limit: 50,
       p_before_date: expect.any(String), p_before_id: id(2),
@@ -660,11 +660,11 @@ describe("dati della dashboard", () => {
     mount(mock.client);
     await screen.findByRole("table");
     const summary = screen.getByRole("region", { name: "Riepilogo finanziario" });
-    expect(summary.textContent).toMatch(/Uscite mensili2,60/);
-    expect(screen.getAllByRole("row")).toHaveLength(26);
-    fireEvent.click(screen.getByRole("button", { name: "Mostra altri movimenti" }));
-    expect(screen.getAllByRole("row")).toHaveLength(27);
-    expect(summary.textContent).toMatch(/Uscite mensili2,60/);
+    expect(summary.textContent).toMatch(/Uscite del mese2,60/);
+    expect(screen.getAllByRole("row")).toHaveLength(10); // 9 righe iniziali + intestazione
+    fireEvent.click(screen.getByRole("button", { name: /Mostra altri \d+ movimenti/ }));
+    expect(screen.getAllByRole("row")).toHaveLength(19); // altre 9 righe rivelate
+    expect(summary.textContent).toMatch(/Uscite del mese2,60/);
   });
 
   it("interrompe le richieste del mese precedente quando si cambia periodo", async () => {

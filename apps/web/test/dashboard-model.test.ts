@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { dashboardPeriod, shiftPeriod, statistics, type Movement } from "../src/features/dashboard/dashboard-model";
+import { amountSizeClass, dashboardPeriod, money, shiftPeriod, statistics, titlePieces, type Movement } from "../src/features/dashboard/dashboard-model";
 
 function movement(overrides: Partial<Movement> & { id: string }): Movement {
   return { date: "2026-11-01", type: "expense", cents: 100n, category: "food", from: null, to: null, voided: false, ...overrides };
@@ -77,6 +77,52 @@ describe("statistics(): bucket giorno/mese", () => {
     const totals = statistics([movement({ id: "1", date: "2026-11-09", cents: 250n })], period);
     expect(totals.buckets).toHaveLength(1);
     expect(totals.expenses).toBe(250n);
+  });
+});
+
+describe("titlePieces(): titolo a ritagli", () => {
+  it("compone Mese, Anno, Settimana corrente e Giorno corrente con le parole attese", () => {
+    const today = "2026-11-09";
+    expect(titlePieces(dashboardPeriod("month", today, today), 82949n).map(p => p.text))
+      .toEqual(["A", "NOVEMBRE", "HAI", "SPESO", money(82949n)]);
+    expect(titlePieces(dashboardPeriod("year", today, today), 1412949n).map(p => p.text))
+      .toEqual(["NEL", "2026", "HAI", "SPESO", money(1412949n)]);
+    expect(titlePieces(dashboardPeriod("week", today, today), 29650n).map(p => p.text))
+      .toEqual(["IN", "SETTIMANA", "HAI", "SPESO", money(29650n)]);
+    expect(titlePieces(dashboardPeriod("day", today, today), 3230n).map(p => p.text))
+      .toEqual(["OGGI", "HAI", "SPESO", money(3230n)]);
+  });
+
+  it("usa una formula diversa per settimana/giorno non correnti, senza 'oggi'", () => {
+    const today = "2026-11-09";
+    const pastWeek = dashboardPeriod("week", "2026-10-01", today);
+    expect(titlePieces(pastWeek, 0n).map(p => p.text).slice(0, 2)).toEqual(["QUELLA", "SETTIMANA"]);
+    const pastDay = dashboardPeriod("day", "2026-10-01", today);
+    expect(titlePieces(pastDay, 0n).map(p => p.text)[0]).not.toBe("OGGI");
+  });
+
+  it("alterna i colori e le inclinazioni della palette per ogni pezzo", () => {
+    const pieces = titlePieces(dashboardPeriod("month", "2026-11-09", "2026-11-09"), 82949n);
+    expect(pieces.map(p => p.background)).toEqual(["#fff", "#E63946", "#FFE14D", "#fff", "#1D4ED8"]);
+    expect(pieces.every(p => p.angle !== 0)).toBe(true);
+  });
+});
+
+describe("amountSizeClass(): gradini per cifre molto grandi", () => {
+  it("resta al corpo normale fino a 10 caratteri", () => {
+    expect(amountSizeClass(["829,49 €"])).toBe("");
+    expect(amountSizeClass(["1.650,00 €"])).toBe("");
+  });
+
+  it("scende di un gradino ogni due caratteri aggiuntivi", () => {
+    expect(amountSizeClass(["−1.220,50 €"])).toBe("s1"); // 11 caratteri
+    expect(amountSizeClass(["987.654,32 €"])).toBe("s1"); // 12 caratteri
+    expect(amountSizeClass(["1.112.345,66 €"])).toBe("s2"); // 14 caratteri
+    expect(amountSizeClass(["123.456.789,01 €"])).toBe("s3"); // 16 caratteri
+  });
+
+  it("usa il valore più lungo del gruppo per tutte le schede della stessa riga", () => {
+    expect(amountSizeClass(["4.279,50 €", "1.112.345,66 €", "829,49 €"])).toBe("s2");
   });
 });
 

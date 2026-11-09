@@ -18,6 +18,7 @@ const dayFormat = new Intl.DateTimeFormat("it-IT", { timeZone: "UTC", day: "nume
 const shortDay = new Intl.DateTimeFormat("it-IT", { timeZone: "UTC", day: "numeric", month: "short" });
 const shortMonth = new Intl.DateTimeFormat("it-IT", { timeZone: "UTC", month: "short" });
 const monthFormat = new Intl.DateTimeFormat("it-IT", { timeZone: "UTC", month: "long", year: "numeric" });
+const monthOnlyFormat = new Intl.DateTimeFormat("it-IT", { timeZone: "UTC", month: "long" });
 const romeDateFormat = new Intl.DateTimeFormat("sv-SE", { timeZone: "Europe/Rome", year: "numeric", month: "2-digit", day: "2-digit" });
 
 export function parseCents(value: unknown): bigint {
@@ -124,4 +125,31 @@ export function spendingHeadline(period: Period, expenses: bigint): string {
     : period.mode === "week" ? (period.current ? "in questa settimana" : `nella settimana del ${period.label}`)
     : period.current ? "oggi" : `il ${period.label}`;
   return `Hai speso ${money(expenses)} ${when}`;
+}
+
+export type TitlePiece = { text: string; background: string; color: string; angle: number };
+// Alternanza bianco/rosso/giallo/bianco/blu dei "ritagli" del titolo (Specifiche.dc.html).
+const titlePalette = [
+  { background: "#fff", color: "#111" }, { background: "#E63946", color: "#fff" },
+  { background: "#FFE14D", color: "#111" }, { background: "#fff", color: "#111" },
+  { background: "#1D4ED8", color: "#fff" },
+] as const;
+const titleAngles = [-3, 2, -1, 3, -2] as const;
+
+export function titlePieces(period: Period, expenses: bigint): TitlePiece[] {
+  const words = period.mode === "year" ? ["NEL", period.label, "HAI", "SPESO"]
+    : period.mode === "month" ? ["A", monthOnlyFormat.format(new Date(period.from)).toUpperCase(), "HAI", "SPESO"]
+    : period.mode === "week" ? (period.current ? ["IN", "SETTIMANA", "HAI", "SPESO"] : ["QUELLA", "SETTIMANA", "HAI", "SPESO"])
+    : period.current ? ["OGGI", "HAI", "SPESO"] : [formatDay(period.from).toUpperCase(), "HAI", "SPESO"];
+  return [...words, money(expenses)].map((text, index) => (
+    { text, ...titlePalette[index % titlePalette.length], angle: titleAngles[index % titleAngles.length] }
+  ));
+}
+
+// "fino a 10 caratteri normale, 11-12, 13-14, oltre 14" (Specifiche.dc.html + brief §4b):
+// il corpo del numero si riduce a gradini così l'importo non esce mai dalla scheda.
+export type AmountSize = "" | "s1" | "s2" | "s3";
+export function amountSizeClass(texts: readonly string[]): AmountSize {
+  const longest = texts.reduce((max, text) => Math.max(max, text.length), 0);
+  return longest <= 10 ? "" : longest <= 12 ? "s1" : longest <= 14 ? "s2" : "s3";
 }

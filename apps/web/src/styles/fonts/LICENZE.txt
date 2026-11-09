@@ -1,0 +1,3 @@
+Font del mockup, sottoinsieme latino, presi dai pacchetti @fontsource.
+Inter: SIL OFL 1.1. Bowlby One: SIL OFL 1.1. Caveat: SIL OFL 1.1. Special Elite: Apache 2.0.
+Sono qui solo per far funzionare il mockup offline. Nel progetto NON vanno copiati senza il via libera del proprietario (vedi brief, sezione font).
