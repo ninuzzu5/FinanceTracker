@@ -13,7 +13,9 @@ export type Movement = {
   voided: boolean;
 };
 
-const currencyFormat = new Intl.NumberFormat("it-IT", { style: "currency", currency: "EUR" });
+// it-IT di default non raggruppa i numeri a quattro cifre ("5328,57"): "always" forza "5.328,57".
+// I tipi di lib.dom non conoscono ancora il valore, da cui il cast.
+const currencyFormat = new Intl.NumberFormat("it-IT", { style: "currency", currency: "EUR", useGrouping: "always" } as unknown as Intl.NumberFormatOptions);
 const dayFormat = new Intl.DateTimeFormat("it-IT", { timeZone: "UTC", day: "numeric", month: "short", year: "numeric" });
 const shortDay = new Intl.DateTimeFormat("it-IT", { timeZone: "UTC", day: "numeric", month: "short" });
 const shortMonth = new Intl.DateTimeFormat("it-IT", { timeZone: "UTC", month: "short" });
@@ -81,6 +83,8 @@ export function dashboardPeriod(mode: PeriodMode, anchor: string, today: string)
   return { mode, from, to, label, current: to === today };
 }
 export type Period = ReturnType<typeof dashboardPeriod>;
+
+export const monthLabel = (monthStart: string) => monthFormat.format(new Date(monthStart));
 
 export function labelForCategory(category: string | null): string {
   if (category === null) return "Senza categoria";

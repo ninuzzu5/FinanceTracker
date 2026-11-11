@@ -168,3 +168,15 @@ describe("robustezza all'ora legale Europe/Rome", () => {
     expect(dashboardPeriod("week", "2026-10-25", "2026-11-01")).toMatchObject({ from: "2026-10-19", to: "2026-10-25" });
   });
 });
+
+describe("money(): separatore delle migliaia", () => {
+  const norm = (cents: bigint) => money(cents).replace(/\s/g, " ");
+  it("raggruppa anche i numeri a quattro cifre", () => {
+    expect(norm(532857n)).toBe("5.328,57 €");
+    expect(norm(123456789n)).toBe("1.234.567,89 €");
+  });
+  it("lascia invariati i numeri sotto i mille e i negativi", () => {
+    expect(norm(99999n)).toBe("999,99 €");
+    expect(norm(-532857n)).toBe("-5.328,57 €");
+  });
+});

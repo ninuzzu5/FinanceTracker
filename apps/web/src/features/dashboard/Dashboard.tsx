@@ -3,7 +3,7 @@ import { ChevronLeft, ChevronRight, LogOut } from "lucide-react";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { Brand } from "../../components/Brand";
 import { categoryIcon } from "./category-icons";
-import { CategoryChart, SpendingChart } from "./Charts";
+import { CategoryChart } from "./Charts";
 import { Calendar } from "./Calendar";
 import { TopSpending } from "./TopSpending";
 import { AccountLogo } from "./AccountLogo";
@@ -33,9 +33,10 @@ type Progress = { pages: number; entries: number };
 type LoadState = { status: "loading" | "error" | "denied" } |
   { status: "ready"; data: Awaited<ReturnType<typeof loadDashboard>> };
 // Quale finestra di dettaglio è aperta: una sola alla volta, per scheda d'origine.
-type OpenDialog = null | { kind: "balance" } | { kind: "income" } | { kind: "expense" } | { kind: "account"; id: string };
+type OpenDialog = null | { kind: "balance" } | { kind: "income" } | { kind: "expense" } | { kind: "account"; id: string }
+  | { kind: "category"; id: string | null } | { kind: "date"; from: string; to: string; label: string };
 
-function DashboardData({ client, sessionSignal, period }: ReadAccess & { period: Period }) {
+function DashboardData({ client, sessionSignal, period, today }: ReadAccess & { period: Period; today: string }) {
   const { retry } = useAuth();
   const [attempt, setAttempt] = useState(0);
   const [loaded, setLoaded] = useState<{ scope: AbortSignal; state: LoadState }>();
@@ -159,14 +160,14 @@ function DashboardData({ client, sessionSignal, period }: ReadAccess & { period:
         </section>)}
       </div>}
     </div>
-    <div className="zine-grid" id="analisi">
-      <SpendingChart totals={totals} period={period} />
-      <CategoryChart totals={totals} />
+    <div id="analisi">
+      <CategoryChart totals={totals} onSelectCategory={category => setOpenDialog({ kind: "category", id: category })} />
     </div>
-    {(period.mode === "month" || period.mode === "week") && <div className="zine-grid">
-      {period.mode === "month" && <Calendar totals={totals} monthStart={period.from} today={period.to} />}
-      <TopSpending entries={entries} accounts={accounts} />
-    </div>}
+    <div className="zine-grid">
+      <Calendar key={period.to.slice(0, 7)} client={client} sessionSignal={sessionSignal} initialMonth={period.to.slice(0, 7)} today={today}
+        onSelectDay={date => setOpenDialog({ kind: "date", ...dashboardPeriod("day", date, today) })} />
+      {(period.mode === "month" || period.mode === "week") && <TopSpending entries={entries} accounts={accounts} />}
+    </div>
     <Movements accounts={accounts} entries={entries} />
     <BalanceDialog open={openDialog?.kind === "balance"} onClose={() => setOpenDialog(null)}
       accounts={accounts} totalCents={hasCompleteBalance ? totalCents : null} dateLabel={`Al ${formatDay(period.to)}`} />
@@ -178,6 +179,12 @@ function DashboardData({ client, sessionSignal, period }: ReadAccess & { period:
       entries={entries.filter(e => e.type === "expense")} accounts={accounts} />
     {accounts.map(account => <AccountDialog key={account.id} open={openDialog?.kind === "account" && openDialog.id === account.id}
       onClose={() => setOpenDialog(null)} account={account} period={period} entries={entries} accounts={accounts} />)}
+    {totals.categories.map(row => <CategoryDialog key={row.category ?? "null"}
+      open={openDialog?.kind === "category" && openDialog.id === row.category} onClose={() => setOpenDialog(null)}
+      category={row.category} amount={row.cents} count={row.count} expensesTotal={totals.expenses} entries={entries} accounts={accounts} />)}
+    <DateDialog open={openDialog?.kind === "date"} onClose={() => setOpenDialog(null)}
+      label={openDialog?.kind === "date" ? openDialog.label : ""} from={openDialog?.kind === "date" ? openDialog.from : ""}
+      to={openDialog?.kind === "date" ? openDialog.to : ""} entries={entries} accounts={accounts} />
   </>;
 }
 
@@ -241,6 +248,36 @@ function AccountDialog({ open, onClose, account, period, entries, accounts }: {
   </DetailDialog>;
 }
 
+function CategoryDialog({ open, onClose, category, amount, count, expensesTotal, entries, accounts }: {
+  open: boolean; onClose: () => void; category: string | null; amount: bigint; count: number; expensesTotal: bigint;
+  entries: readonly Movement[]; accounts: readonly Balance[];
+}) {
+  const percent = expensesTotal > 0n ? Number(amount) / Number(expensesTotal) * 100 : 0;
+  const categoryEntries = entries.filter(e => e.type === "expense" && e.category === category);
+  return <DetailDialog open={open} onClose={onClose} title={labelForCategory(category)}>
+    <div className="zine-dialog-row"><span className="zine-label">Totale</span><strong className="zine-amount s1">{money(amount)}</strong></div>
+    <div className="zine-dialog-row"><span className="zine-label">Quota sulle uscite</span><strong>{percent.toFixed(1).replace(".", ",")}%</strong></div>
+    <div className="zine-dialog-row"><span className="zine-label">Movimenti</span><strong>{count}</strong></div>
+    <MovementsTable entries={categoryEntries} accounts={accounts} />
+  </DetailDialog>;
+}
+
+// Finestra di un giorno (click su una cella del calendario): totale, categorie e movimenti.
+function DateDialog({ open, onClose, label, from, to, entries, accounts }: {
+  open: boolean; onClose: () => void; label: string; from: string; to: string; entries: readonly Movement[]; accounts: readonly Balance[];
+}) {
+  // Quando non è la finestra aperta, from/to sono vuoti (nessuna data in corso): niente da
+  // calcolare, il contenuto non è comunque visibile dietro il <dialog> chiuso.
+  const rangeEntries = from ? entries.filter(e => e.date >= from && e.date <= to) : [];
+  const totals = from ? statistics(rangeEntries, { mode: "day", from, to, label, current: false })
+    : { income: 0n, expenses: 0n, buckets: [], categories: [], incomeCategories: [] };
+  return <DetailDialog open={open} onClose={onClose} title={label}>
+    <p className="zine-dialog-total"><strong className="zine-amount s1">{money(totals.expenses)}</strong></p>
+    <CategoryBars categories={totals.categories} total={totals.expenses} />
+    <MovementsTable entries={rangeEntries} accounts={accounts} />
+  </DetailDialog>;
+}
+
 export function Dashboard({ client, sessionSignal }: ReadAccess) {
   const { signOut } = useAuth();
   const [today, setToday] = useState(todayInRome);
@@ -271,19 +308,19 @@ export function Dashboard({ client, sessionSignal }: ReadAccess) {
       </div>
       <main id="contenuto" tabIndex={-1}>
         <h1 className="sr-only">Panoramica</h1>
-        <DashboardContent client={client} sessionSignal={sessionSignal} period={period} selectPeriod={selectPeriod} selectMode={selectMode} />
+        <DashboardContent client={client} sessionSignal={sessionSignal} period={period} today={today} selectPeriod={selectPeriod} selectMode={selectMode} />
       </main>
       <footer className="zine-footer"><Mascot state="happy" size={44} /><span>FinanceTracker · dati dal bot Telegram · sola lettura</span></footer>
     </div>
   </div>;
 }
 
-function DashboardContent({ client, sessionSignal, period, selectPeriod, selectMode }: ReadAccess & {
-  period: Period; selectPeriod: (offset: number) => void; selectMode: (mode: PeriodMode) => void;
+function DashboardContent({ client, sessionSignal, period, today, selectPeriod, selectMode }: ReadAccess & {
+  period: Period; today: string; selectPeriod: (offset: number) => void; selectMode: (mode: PeriodMode) => void;
 }) {
   return <div style={{ display: "flex", flexDirection: "column", gap: 44 }}>
     <PeriodControls period={period} selectPeriod={selectPeriod} selectMode={selectMode} />
-    <DashboardData key={`${period.mode}:${period.from}:${period.to}`} client={client} sessionSignal={sessionSignal} period={period} />
+    <DashboardData key={`${period.mode}:${period.from}:${period.to}`} client={client} sessionSignal={sessionSignal} period={period} today={today} />
   </div>;
 }
 

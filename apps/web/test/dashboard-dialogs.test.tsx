@@ -123,4 +123,17 @@ describe("finestre di dettaglio della dashboard", () => {
     expect(dialog.textContent).toMatch(/0,00\s€/);
     expect(dialog.textContent).toContain("Nessun movimento nel periodo.");
   });
+
+  it("il click su una categoria della torta apre la finestra di quella categoria", async () => {
+    const mock = mockClient();
+    withData(mock);
+    mount(mock.client);
+    const legend = await screen.findByRole("list", { name: "Categorie di spesa" });
+    fireEvent.click(within(legend).getByRole("button", { name: /^Spesa/ }));
+    const dialog = await screen.findByRole("dialog");
+    expect(dialog.textContent).toContain("Spesa");
+    expect(dialog.textContent).toMatch(/30,00\s€/);
+    expect(dialog.textContent).toContain("Quota sulle uscite");
+    expect(dialog.textContent).toContain("Movimenti");
+  });
 });

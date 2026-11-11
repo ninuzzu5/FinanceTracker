@@ -16,7 +16,7 @@ function deferred<T>() {
 // Le finestre di dettaglio restano nel DOM anche chiuse (<dialog> senza l'attributo "open"),
 // per questo possono duplicare un testo già visibile nella pagina: le query di testo più
 // generiche la escludono esplicitamente, restando sul contenuto davvero a schermo.
-const onlyVisible = { ignore: "dialog:not([open]) *" } as const;
+const onlyVisible = { ignore: "dialog:not([open]) *, option" } as const;
 function mockClient(initial: Session | null = null) {
   const listeners = new Set<(event: AuthChangeEvent, session: Session | null) => void>();
   const unsubscribe = vi.fn();
@@ -586,7 +586,6 @@ describe("dati della dashboard", () => {
     expect(screen.getByText("ANNULLATO", onlyVisible)).toBeTruthy();
     expect(screen.getByText("Trasferimento", onlyVisible)).toBeTruthy();
     expect(screen.getByText("CONTO INATTIVO", onlyVisible)).toBeTruthy();
-    expect(screen.getByRole("img", { name: /Spese giorno per giorno/ })).toBeTruthy();
     expect(mock.rpc).toHaveBeenCalledWith("get_dashboard_movements", {
       p_from: expect.any(String), p_to: expect.any(String), p_limit: 50,
       p_before_date: expect.any(String), p_before_id: id(2),
@@ -646,6 +645,7 @@ describe("dati della dashboard", () => {
       ? ok([balance(args.p_as_of)]) : ok([]));
     mount(mock.client);
     await screen.findByText("Conto di verifica", onlyVisible);
+    await screen.findByRole("list", { name: "Spese giorno per giorno" });
     const calls = mock.rpc.mock.calls.length;
     const otherUser = { ...user, id: id(99) };
     mock.auth.getUser.mockResolvedValue({ data: { user: otherUser }, error: null });
