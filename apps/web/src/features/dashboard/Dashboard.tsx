@@ -2,17 +2,20 @@ import { useEffect, useState } from "react";
 import { ChevronLeft, ChevronRight, LogOut } from "lucide-react";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { Brand } from "../../components/Brand";
+import { categoryIcon } from "./category-icons";
 import { CategoryChart, SpendingChart } from "./Charts";
 import { Calendar } from "./Calendar";
 import { TopSpending } from "./TopSpending";
 import { AccountLogo } from "./AccountLogo";
 import { Mascot } from "./Mascot";
 import { Movements } from "./Movements";
+import { MovementsTable } from "./MovementsTable";
+import { DetailDialog } from "./DetailDialog";
 import { useAuth } from "../../auth/AuthProvider";
 import { DashboardAccessError, loadDashboard } from "./dashboard-data";
 import {
-  amountSizeClass, dashboardPeriod, firstDate, formatDay, money, periodModes, shiftPeriod, statistics,
-  titlePieces, todayInRome, type Period, type PeriodMode,
+  amountSizeClass, dashboardPeriod, firstDate, formatDay, labelForCategory, money, periodModes, shiftPeriod, statistics,
+  titlePieces, todayInRome, type Balance, type Movement, type Period, type PeriodMode,
 } from "./dashboard-model";
 
 const navigation = [
@@ -29,12 +32,15 @@ type ReadAccess = { client: SupabaseClient; sessionSignal: AbortSignal };
 type Progress = { pages: number; entries: number };
 type LoadState = { status: "loading" | "error" | "denied" } |
   { status: "ready"; data: Awaited<ReturnType<typeof loadDashboard>> };
+// Quale finestra di dettaglio è aperta: una sola alla volta, per scheda d'origine.
+type OpenDialog = null | { kind: "balance" } | { kind: "income" } | { kind: "expense" } | { kind: "account"; id: string };
 
 function DashboardData({ client, sessionSignal, period }: ReadAccess & { period: Period }) {
   const { retry } = useAuth();
   const [attempt, setAttempt] = useState(0);
   const [loaded, setLoaded] = useState<{ scope: AbortSignal; state: LoadState }>();
   const [progress, setProgress] = useState<Progress>();
+  const [openDialog, setOpenDialog] = useState<OpenDialog>(null);
   const state: LoadState = loaded?.scope === sessionSignal ? loaded.state : { status: "loading" };
 
   useEffect(() => {
@@ -112,26 +118,29 @@ function DashboardData({ client, sessionSignal, period }: ReadAccess & { period:
     </h2>
     <section className="zine-grid zine-summary" aria-label="Riepilogo finanziario">
       <section className="zine-card" style={{ "--tilt": "-0.5deg", "--card-bg": inRed ? "#FFC2C7" : "#8FE0A8" } as React.CSSProperties}>
-        <div className="zine-card-body">
+        <button type="button" className="zine-card-body zine-card-trigger" onClick={() => setOpenDialog({ kind: "balance" })}>
           <h2 className="zine-label">Saldo complessivo</h2>
           <div className={`zine-amount ${summarySize} ${inRed ? "zine-negative" : ""}`}>{balance}</div>
           <p className="zine-sub">{hasCompleteBalance ? `Al ${formatDay(period.to)}` : "Saldo complessivo non disponibile"}
             {inRed && <span className="zine-chip-static" style={{ background: "#fff" }}>IN ROSSO</span>}</p>
-        </div>
+          <span className="zine-card-details">Dettagli ›</span>
+        </button>
       </section>
       <section className="zine-card" style={{ "--tilt": "0.5deg" } as React.CSSProperties}>
-        <div className="zine-card-body">
+        <button type="button" className="zine-card-body zine-card-trigger" onClick={() => setOpenDialog({ kind: "income" })}>
           <h2 className="zine-label">Entrate {flowAdjective[period.mode]}</h2>
           <div className={`zine-amount ${summarySize}`}>{money(totals.income)}</div>
           <p className="zine-sub">Movimenti contabilizzati</p>
-        </div>
+          <span className="zine-card-details">Dettagli ›</span>
+        </button>
       </section>
       <section className="zine-card" style={{ "--tilt": "-0.4deg", "--card-bg": "var(--yellow)" } as React.CSSProperties}>
-        <div className="zine-card-body">
+        <button type="button" className="zine-card-body zine-card-trigger" onClick={() => setOpenDialog({ kind: "expense" })}>
           <h2 className="zine-label">Uscite {flowAdjective[period.mode]}</h2>
           <div className={`zine-amount ${summarySize}`}>{money(totals.expenses)}</div>
           <p className="zine-sub">Movimenti contabilizzati</p>
-        </div>
+          <span className="zine-card-details">Dettagli ›</span>
+        </button>
       </section>
     </section>
     <div className="zine-accounts">
@@ -139,13 +148,14 @@ function DashboardData({ client, sessionSignal, period }: ReadAccess & { period:
         <span className="zine-count">{accounts.length} {accounts.length === 1 ? "conto" : "conti"}</span></div>
       {accounts.length === 0 ? <p className="zine-chart-note">Nessun conto disponibile.</p> : <div className="zine-grid">
         {accounts.map((account, i) => <section className="zine-card zine-account-card" key={account.id} style={{ "--tilt": `${(i % 2 === 0 ? -1 : 1) * 0.4}deg` } as React.CSSProperties}>
-          <div className="zine-card-body">
+          <button type="button" className="zine-card-body zine-card-trigger" onClick={() => setOpenDialog({ kind: "account", id: account.id })}>
             <div className="zine-account-head"><AccountLogo name={account.name} />
               {!account.active && <span className="zine-chip-static zine-inactive-chip">CONTO INATTIVO</span>}</div>
             <div className={`zine-amount ${accountSize}`}>
               {account.cents !== null ? money(account.cents) : account.status === "before_opening" ? "Prima dell'apertura" : "Saldo non configurato"}
             </div>
-          </div>
+            <span className="zine-card-details">Dettagli ›</span>
+          </button>
         </section>)}
       </div>}
     </div>
@@ -158,7 +168,77 @@ function DashboardData({ client, sessionSignal, period }: ReadAccess & { period:
       <TopSpending entries={entries} accounts={accounts} />
     </div>}
     <Movements accounts={accounts} entries={entries} />
+    <BalanceDialog open={openDialog?.kind === "balance"} onClose={() => setOpenDialog(null)}
+      accounts={accounts} totalCents={hasCompleteBalance ? totalCents : null} dateLabel={`Al ${formatDay(period.to)}`} />
+    <FlowDialog open={openDialog?.kind === "income"} onClose={() => setOpenDialog(null)}
+      type="income" title={`Entrate ${flowAdjective[period.mode]}`} total={totals.income} categories={totals.incomeCategories}
+      entries={entries.filter(e => e.type === "income")} accounts={accounts} />
+    <FlowDialog open={openDialog?.kind === "expense"} onClose={() => setOpenDialog(null)}
+      type="expense" title={`Uscite ${flowAdjective[period.mode]}`} total={totals.expenses} categories={totals.categories}
+      entries={entries.filter(e => e.type === "expense")} accounts={accounts} />
+    {accounts.map(account => <AccountDialog key={account.id} open={openDialog?.kind === "account" && openDialog.id === account.id}
+      onClose={() => setOpenDialog(null)} account={account} period={period} entries={entries} accounts={accounts} />)}
   </>;
+}
+
+function BalanceDialog({ open, onClose, accounts, totalCents, dateLabel }: {
+  open: boolean; onClose: () => void; accounts: readonly Balance[]; totalCents: bigint | null; dateLabel: string;
+}) {
+  return <DetailDialog open={open} onClose={onClose} title="Saldo complessivo">
+    <ul className="zine-dialog-accounts">
+      {accounts.map(account => <li key={account.id} className="zine-dialog-account-row">
+        <AccountLogo name={account.name} />
+        {!account.active && <span className="zine-chip-static zine-inactive-chip">CONTO INATTIVO</span>}
+        <strong>{account.cents !== null ? money(account.cents) : account.status === "before_opening" ? "Prima dell'apertura" : "Saldo non configurato"}</strong>
+      </li>)}
+    </ul>
+    <div className="zine-dialog-total"><span>Totale</span><strong>{totalCents !== null ? money(totalCents) : "—"}</strong></div>
+    <p className="zine-chart-note">{dateLabel}</p>
+  </DetailDialog>;
+}
+
+function CategoryBars({ categories, total }: { categories: readonly { category: string | null; cents: bigint; count: number }[]; total: bigint }) {
+  if (categories.length === 0) return null;
+  return <ul className="zine-dialog-bars">
+    {categories.map(row => {
+      const percent = total > 0n ? Number(row.cents) / Number(total) * 100 : 0;
+      return <li key={row.category ?? "null"} className="zine-dialog-bar-row">
+        <img src={categoryIcon(row.category)} alt="" className="zine-top-icon" />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div className="zine-dialog-bar-label"><span>{labelForCategory(row.category)}</span>
+            <span>{money(row.cents)} · {percent < 0.5 ? "<1%" : `${Math.round(percent)}%`}</span></div>
+          <div className="zine-top-bar"><i style={{ width: `${percent}%` }} /></div>
+        </div>
+      </li>;
+    })}
+  </ul>;
+}
+
+function FlowDialog({ open, onClose, title, total, categories, entries, accounts }: {
+  open: boolean; onClose: () => void; type: "income" | "expense"; title: string; total: bigint;
+  categories: readonly { category: string | null; cents: bigint; count: number }[]; entries: readonly Movement[]; accounts: readonly Balance[];
+}) {
+  return <DetailDialog open={open} onClose={onClose} title={title}>
+    <p className="zine-dialog-total"><strong className={`zine-amount s1`}>{money(total)}</strong></p>
+    <CategoryBars categories={categories} total={total} />
+    <MovementsTable entries={entries} accounts={accounts} />
+  </DetailDialog>;
+}
+
+function AccountDialog({ open, onClose, account, period, entries, accounts }: {
+  open: boolean; onClose: () => void; account: Balance; period: Period; entries: readonly Movement[]; accounts: readonly Balance[];
+}) {
+  const accountEntries = entries.filter(e => e.from === account.id || e.to === account.id);
+  const totals = statistics(accountEntries, period);
+  return <DetailDialog open={open} onClose={onClose} title={account.name}>
+    <div className="zine-dialog-row">
+      <span className="zine-label">Saldo</span>
+      <strong className="zine-amount s1">{account.cents !== null ? money(account.cents) : account.status === "before_opening" ? "Prima dell'apertura" : "Saldo non configurato"}</strong>
+    </div>
+    <div className="zine-dialog-row"><span className="zine-label">Entrate del periodo</span><strong>{money(totals.income)}</strong></div>
+    <div className="zine-dialog-row"><span className="zine-label">Uscite del periodo</span><strong>{money(totals.expenses)}</strong></div>
+    <MovementsTable entries={accountEntries} accounts={accounts} perspectiveAccountId={account.id} />
+  </DetailDialog>;
 }
 
 export function Dashboard({ client, sessionSignal }: ReadAccess) {

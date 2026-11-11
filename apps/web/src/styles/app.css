@@ -115,6 +115,26 @@ button, a, input { transition: transform .12s, box-shadow .12s, background-color
 .zine-cash { display: inline-flex; align-items: center; gap: 8px; font-family: var(--font-hand); font-weight: 700; font-size: 26px; line-height: 1; }
 .zine-inactive-chip { font-size: 12px; margin-left: 8px; }
 
+/* Schede cliccabili (Saldo, Entrate, Uscite, Conto): il corpo intero è il pulsante. */
+.zine-card-trigger { display: block; width: 100%; border: 0; text-align: left; }
+.zine-card-details { display: block; margin-top: 14px; font-family: var(--font-display); font-size: 13px; color: #555; }
+.zine-card-trigger:hover .zine-card-details, .zine-card-trigger:focus-visible .zine-card-details { color: var(--ink); }
+
+/* Finestra di dettaglio: <dialog> nativo, stile scheda senza inclinazione. */
+dialog.zine-dialog { position: fixed; margin: auto; padding: 0; border: var(--border-width) solid var(--ink); width: min(92vw, 720px); max-height: 86vh; }
+.zine-dialog::backdrop { background: #11111199; }
+.zine-dialog-body { max-height: 86vh; overflow-y: auto; box-sizing: border-box; display: flex; flex-direction: column; gap: 16px; }
+.zine-dialog-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; }
+.zine-dialog-head h2 { flex: 1; min-width: 0; }
+.zine-dialog-close { flex: none; }
+.zine-dialog-accounts { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
+.zine-dialog-account-row, .zine-dialog-row { display: flex; align-items: center; gap: 10px; }
+.zine-dialog-row { justify-content: space-between; padding: 6px 0; border-bottom: 2px dashed var(--ink); }
+.zine-dialog-total { display: flex; align-items: center; justify-content: space-between; padding-top: 10px; border-top: 3px solid var(--ink); font-family: var(--font-display); }
+.zine-dialog-bars { list-style: none; margin: 0; padding: 0; display: grid; gap: 14px; }
+.zine-dialog-bar-row { display: flex; align-items: center; gap: 12px; }
+.zine-dialog-bar-label { display: flex; justify-content: space-between; gap: 10px; font-size: 14px; margin-bottom: 4px; }
+
 /* Grafici: torta, barre+linea cumulata. */
 .zine-pie-row { display: flex; gap: 44px; align-items: center; flex-wrap: wrap; }
 .zine-pie-wrap { position: relative; width: min(100%, 360px); flex: none; margin: 0 auto; }
@@ -228,6 +248,9 @@ button.zine-input-eye { left: auto; right: 10px; width: 36px; height: 36px; bord
   .zine-line { stroke-dasharray: 1; animation: zine-draw .9s ease-out .4s backwards; }
   .zine-pie-badge { animation: zine-pop .5s cubic-bezier(.2, 1.6, .4, 1) .8s backwards; }
   .zine-card { animation: zine-fade .3s backwards; }
+  @keyframes zine-dialog-in { from { opacity: 0; transform: scale(.96); } }
+  dialog.zine-dialog[open] { animation: zine-dialog-in .18s ease-out; }
+  dialog.zine-dialog[open]::backdrop { animation: zine-fade .18s ease-out; }
 }
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }
@@ -266,4 +289,8 @@ button.zine-input-eye { left: auto; right: 10px; width: 36px; height: 36px; bord
   .zine-legend-label { white-space: normal; font-size: 13px; line-height: 1.2; }
   .zine-calendar { gap: 4px; }
   .zine-calendar-cell { font-size: 12px; border-width: 2px; }
+  /* Finestra di dettaglio: a tutta altezza, chiusura sempre visibile in alto. */
+  dialog.zine-dialog { width: 100%; height: 100%; max-height: 100%; max-width: 100%; inset: 0; }
+  .zine-dialog-body { max-height: 100%; height: 100%; }
+  .zine-dialog-head { position: sticky; top: 0; background: var(--card-bg, #fff); padding-bottom: 10px; margin-bottom: -4px; z-index: 1; }
 }

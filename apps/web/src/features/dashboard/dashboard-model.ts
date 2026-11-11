@@ -87,6 +87,22 @@ export function labelForCategory(category: string | null): string {
   return Object.hasOwn(categoryLabels, category) ? categoryLabels[category as keyof typeof categoryLabels] : category;
 }
 
+// Scomposizione per categoria di un sottoinsieme di movimenti (un conto, un periodo, una
+// finestra di dettaglio): importo e numero di movimenti, ordinata per importo decrescente.
+// Unica funzione per entrate e uscite, riusata da statistics() e dalle finestre di dettaglio.
+export type CategoryBreakdownRow = { category: string | null; cents: bigint; count: number };
+export function categoryBreakdown(movements: readonly Movement[], type: "income" | "expense"): CategoryBreakdownRow[] {
+  const rows = new Map<string | null, CategoryBreakdownRow>();
+  for (const movement of movements) {
+    if (movement.voided || movement.type !== type) continue;
+    const row = rows.get(movement.category) ?? { category: movement.category, cents: 0n, count: 0 };
+    row.cents += movement.cents;
+    row.count += 1;
+    rows.set(movement.category, row);
+  }
+  return [...rows.values()].sort((a, b) => a.cents > b.cents ? -1 : a.cents < b.cents ? 1 : 0);
+}
+
 export function statistics(movements: readonly Movement[], period: Period) {
   let income = 0n;
   let expenses = 0n;
@@ -98,7 +114,6 @@ export function statistics(movements: readonly Movement[], period: Period) {
   for (let date = period.from; date <= period.to; date = shiftPeriod(byMonth ? "month" : "day", date, 1)) {
     buckets.set(bucketKey(date), { date, label: (byMonth ? shortMonth : shortDay).format(new Date(date)), income: 0n, expenses: 0n });
   }
-  const categories = new Map<string | null, bigint>();
   for (const movement of movements) {
     if (movement.voided || movement.type === "transfer") continue;
     const bucket = buckets.get(bucketKey(movement.date));
@@ -108,14 +123,14 @@ export function statistics(movements: readonly Movement[], period: Period) {
     } else {
       expenses += movement.cents;
       if (bucket) bucket.expenses += movement.cents;
-      categories.set(movement.category, (categories.get(movement.category) ?? 0n) + movement.cents);
     }
   }
   return {
     income,
     expenses,
     buckets: [...buckets.values()],
-    categories: [...categories].sort(([, left], [, right]) => left > right ? -1 : left < right ? 1 : 0),
+    categories: categoryBreakdown(movements, "expense"),
+    incomeCategories: categoryBreakdown(movements, "income"),
   };
 }
 

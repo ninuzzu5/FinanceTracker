@@ -15,9 +15,9 @@ export function CategoryChart({ totals }: { totals: Statistics }) {
   const { expenses, categories } = totals;
   const top = categories.slice(0, topCount);
   const rest = categories.slice(topCount);
-  const restTotal = rest.reduce((sum, [, amount]) => sum + amount, 0n);
+  const restTotal = rest.reduce((sum, { cents }) => sum + cents, 0n);
   const segments = [
-    ...top.map(([category, amount], index) => ({ id: category, amount, icon: categoryIcon(category), color: wedgeColors[index % wedgeColors.length] })),
+    ...top.map(({ category, cents }, index) => ({ id: category, amount: cents, icon: categoryIcon(category), color: wedgeColors[index % wedgeColors.length] })),
     ...(restTotal > 0n ? [{ id: "__other__", amount: restTotal, icon: otherIcon, color: otherColor }] : []),
   ];
 
@@ -63,13 +63,13 @@ export function CategoryChart({ totals }: { totals: Statistics }) {
           </li>)}</ul>
           {rest.length > 0 && <details className="zine-more">
             <summary>Mostra le altre {rest.length} categorie</summary>
-            <ul className="zine-legend">{rest.map(([category, amount]) => {
-              const percent = Number(amount) / Number(expenses) * 100;
+            <ul className="zine-legend">{rest.map(({ category, cents }) => {
+              const percent = Number(cents) / Number(expenses) * 100;
               return <li className="zine-legend-row is-compact" key={category ?? "null"}>
                 <i className="zine-swatch" style={{ background: otherColor }} />
                 <img className="zine-legend-icon" src={categoryIcon(category)} alt="" />
                 <span className="zine-legend-label">{labelForCategory(category)}</span>
-                <span className="zine-legend-amount">{money(amount)}</span>
+                <span className="zine-legend-amount">{money(cents)}</span>
                 <span className="zine-legend-pct">{percent < 0.5 ? "<1%" : `${Math.round(percent)}%`}</span>
               </li>;
             })}</ul>
