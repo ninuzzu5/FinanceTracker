@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { amountSizeClass, dashboardPeriod, money, shiftPeriod, statistics, titlePieces, type Movement } from "../src/features/dashboard/dashboard-model";
+import { amountSizeClass, categoryBreakdown, dashboardPeriod, money, shiftPeriod, statistics, titlePieces, type Movement } from "../src/features/dashboard/dashboard-model";
 
 function movement(overrides: Partial<Movement> & { id: string }): Movement {
   return { date: "2026-11-01", type: "expense", cents: 100n, category: "food", from: null, to: null, voided: false, ...overrides };
@@ -69,7 +69,8 @@ describe("statistics(): bucket giorno/mese", () => {
     expect(totals.buckets.find(b => b.date === "2026-11-01")).toMatchObject({ income: 1000n, expenses: 500n });
     expect(totals.buckets.find(b => b.date === "2026-11-02")).toMatchObject({ income: 0n, expenses: 300n });
     expect(totals.buckets.find(b => b.date === "2026-11-03")).toMatchObject({ income: 0n, expenses: 0n });
-    expect(totals.categories).toEqual([["food", 800n]]);
+    expect(totals.categories).toEqual([{ category: "food", cents: 800n, count: 2 }]);
+    expect(totals.incomeCategories).toEqual([{ category: "salary", cents: 1000n, count: 1 }]);
   });
 
   it("si riduce a un solo bucket nella vista Giorno", () => {
@@ -77,6 +78,34 @@ describe("statistics(): bucket giorno/mese", () => {
     const totals = statistics([movement({ id: "1", date: "2026-11-09", cents: 250n })], period);
     expect(totals.buckets).toHaveLength(1);
     expect(totals.expenses).toBe(250n);
+  });
+});
+
+describe("categoryBreakdown(): scomposizione per categoria", () => {
+  it("somma importo e conta i movimenti per categoria, ordinando per importo decrescente", () => {
+    const rows = categoryBreakdown([
+      movement({ id: "1", category: "food", cents: 500n, type: "expense" }),
+      movement({ id: "2", category: "food", cents: 300n, type: "expense" }),
+      movement({ id: "3", category: "rent", cents: 900n, type: "expense" }),
+    ], "expense");
+    expect(rows).toEqual([
+      { category: "rent", cents: 900n, count: 1 },
+      { category: "food", cents: 800n, count: 2 },
+    ]);
+  });
+
+  it("esclude il tipo richiesto, i trasferimenti e gli annullati", () => {
+    const rows = categoryBreakdown([
+      movement({ id: "1", category: "salary", cents: 1000n, type: "income" }),
+      movement({ id: "2", category: "food", cents: 500n, type: "expense" }),
+      movement({ id: "3", category: null, cents: 50n, type: "transfer" }),
+      movement({ id: "4", category: "food", cents: 10n, type: "expense", voided: true }),
+    ], "income");
+    expect(rows).toEqual([{ category: "salary", cents: 1000n, count: 1 }]);
+  });
+
+  it("restituisce un elenco vuoto senza movimenti del tipo richiesto", () => {
+    expect(categoryBreakdown([movement({ id: "1", type: "income", category: "salary" })], "expense")).toEqual([]);
   });
 });
 
@@ -137,5 +166,17 @@ describe("robustezza all'ora legale Europe/Rome", () => {
     expect(shiftPeriod("day", "2026-10-24", 1)).toBe("2026-10-25");
     expect(shiftPeriod("day", "2026-10-24", 2)).toBe("2026-10-26");
     expect(dashboardPeriod("week", "2026-10-25", "2026-11-01")).toMatchObject({ from: "2026-10-19", to: "2026-10-25" });
+  });
+});
+
+describe("money(): separatore delle migliaia", () => {
+  const norm = (cents: bigint) => money(cents).replace(/\s/g, " ");
+  it("raggruppa anche i numeri a quattro cifre", () => {
+    expect(norm(532857n)).toBe("5.328,57 €");
+    expect(norm(123456789n)).toBe("1.234.567,89 €");
+  });
+  it("lascia invariati i numeri sotto i mille e i negativi", () => {
+    expect(norm(99999n)).toBe("999,99 €");
+    expect(norm(-532857n)).toBe("-5.328,57 €");
   });
 });

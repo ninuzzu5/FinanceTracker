@@ -13,6 +13,10 @@ function deferred<T>() {
   const promise = new Promise<T>(done => { resolve = done; });
   return { promise, resolve };
 }
+// Le finestre di dettaglio restano nel DOM anche chiuse (<dialog> senza l'attributo "open"),
+// per questo possono duplicare un testo già visibile nella pagina: le query di testo più
+// generiche la escludono esplicitamente, restando sul contenuto davvero a schermo.
+const onlyVisible = { ignore: "dialog:not([open]) *, option" } as const;
 function mockClient(initial: Session | null = null) {
   const listeners = new Set<(event: AuthChangeEvent, session: Session | null) => void>();
   const unsubscribe = vi.fn();
@@ -579,10 +583,9 @@ describe("dati della dashboard", () => {
     expect(summary.textContent).toMatch(/Uscite del mese0,30/);
     expect(summary.textContent).toMatch(/Entrate del mese1,05/);
     expect(screen.getAllByRole("row")).toHaveLength(6);
-    expect(screen.getByText("ANNULLATO")).toBeTruthy();
-    expect(screen.getByText("Trasferimento")).toBeTruthy();
-    expect(screen.getByText("CONTO INATTIVO")).toBeTruthy();
-    expect(screen.getByRole("img", { name: /Spese giorno per giorno/ })).toBeTruthy();
+    expect(screen.getByText("ANNULLATO", onlyVisible)).toBeTruthy();
+    expect(screen.getByText("Trasferimento", onlyVisible)).toBeTruthy();
+    expect(screen.getByText("CONTO INATTIVO", onlyVisible)).toBeTruthy();
     expect(mock.rpc).toHaveBeenCalledWith("get_dashboard_movements", {
       p_from: expect.any(String), p_to: expect.any(String), p_limit: 50,
       p_before_date: expect.any(String), p_before_id: id(2),
@@ -641,7 +644,8 @@ describe("dati della dashboard", () => {
     mock.readRpc.mockImplementation((name, args) => name === "get_dashboard_balances"
       ? ok([balance(args.p_as_of)]) : ok([]));
     mount(mock.client);
-    await screen.findByText("Conto di verifica");
+    await screen.findByText("Conto di verifica", onlyVisible);
+    await screen.findByRole("list", { name: "Spese giorno per giorno" });
     const calls = mock.rpc.mock.calls.length;
     const otherUser = { ...user, id: id(99) };
     mock.auth.getUser.mockResolvedValue({ data: { user: otherUser }, error: null });
@@ -693,7 +697,7 @@ describe("dati della dashboard", () => {
         balance: null, status: "not_configured" }]) : ok([]));
     mount(mock.client);
     await screen.findByText("Saldo complessivo non disponibile");
-    expect(screen.getByText("Saldo non configurato")).toBeTruthy();
-    expect(screen.getByText("Nessun movimento nel periodo.")).toBeTruthy();
+    expect(screen.getByText("Saldo non configurato", onlyVisible)).toBeTruthy();
+    expect(screen.getByText("Nessun movimento nel periodo.", onlyVisible)).toBeTruthy();
   });
 });

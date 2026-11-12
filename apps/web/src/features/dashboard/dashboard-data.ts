@@ -32,7 +32,11 @@ async function balances(client: SupabaseClient, date: string, signal: AbortSigna
   });
 }
 
-async function movements(client: SupabaseClient, period: Period, signal: AbortSignal, onPage?: (pages: number, entries: number) => void): Promise<Movement[]> {
+// Usata sia per il periodo principale sia, da sola, per un mese del calendario (Calendar.tsx):
+// in entrambi i casi serve solo un intervallo di date, non un Period completo.
+export async function loadMovements(
+  client: SupabaseClient, range: { from: string; to: string }, signal: AbortSignal, onPage?: (pages: number, entries: number) => void,
+): Promise<Movement[]> {
   const all: Movement[] = [];
   const seen = new Set<string>();
   let previous: Movement | undefined;
@@ -40,7 +44,7 @@ async function movements(client: SupabaseClient, period: Period, signal: AbortSi
   for (;;) {
     signal.throwIfAborted();
     const result = await client.rpc("get_dashboard_movements", {
-      p_from: period.from, p_to: period.to, p_limit: pageSize,
+      p_from: range.from, p_to: range.to, p_limit: pageSize,
       ...(previous ? { p_before_date: previous.date, p_before_id: previous.id } : {}),
     }, { get: true }).abortSignal(signal);
     signal.throwIfAborted();
@@ -51,7 +55,7 @@ async function movements(client: SupabaseClient, period: Period, signal: AbortSi
     for (const row of page) {
       const { id, type, transaction_date: date, category, from_account_id: from, to_account_id: to, voided } = row;
       if (typeof id !== "string" || !uuid.test(id) || seen.has(id) || typeof date !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(date)
-        || date < period.from || date > period.to || (previous && (date > previous.date || date === previous.date && id >= previous.id))
+        || date < range.from || date > range.to || (previous && (date > previous.date || date === previous.date && id >= previous.id))
         || (type !== "expense" && type !== "income" && type !== "transfer") || (category !== null && typeof category !== "string")
         || !nullableId(from) || !nullableId(to) || typeof voided !== "boolean") throw invalidData();
       const cents = parseCents(row.amount);
@@ -68,7 +72,7 @@ export async function loadDashboard(
   client: SupabaseClient, period: Period, signal: AbortSignal, onPage?: (pages: number, entries: number) => void,
 ) {
   signal.throwIfAborted();
-  const [accounts, entries] = await Promise.all([balances(client, period.to, signal), movements(client, period, signal, onPage)]);
+  const [accounts, entries] = await Promise.all([balances(client, period.to, signal), loadMovements(client, period, signal, onPage)]);
   signal.throwIfAborted();
   return { accounts, entries };
 }

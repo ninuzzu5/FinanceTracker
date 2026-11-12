@@ -1,74 +1,81 @@
 # FinanceTracker
 
-Uso FinanceTracker per registrare entrate, uscite e trasferimenti da Telegram.
-Il bot interpreta il testo con regole TypeScript, mostra un riepilogo e salva
-solo dopo la conferma. Supabase/PostgreSQL conserva i dati contabili.
-La dashboard web mostra saldi, movimenti e statistiche in sola lettura dopo
-l’accesso con l’account web dedicato e la verifica MFA.
+Il mio tracker di finanze personali. Registro entrate, uscite e trasferimenti
+scrivendo a un bot Telegram, i dati stanno su Supabase (PostgreSQL) e una
+dashboard web me li fa vedere in sola lettura.
 
-## Uso del bot
+Il progetto è fatto su misura per me: tre conti (Revolut, Isybank, Contanti),
+solo euro, un solo utente.
 
-Apri la chat privata autorizzata e invia un messaggio, per esempio:
+## Come funziona
 
-- `ieri 12,50 spesa isybank`
-- `100 stipendio revolut`
-- `12 pranzo contanti`
-- `50 da revolut a contanti`
+- **Bot Telegram** (`apps/bot`): scrivo `12 pranzo contanti`, lui capisce importo,
+  categoria, conto e data con regole scritte a mano, mi mostra un riepilogo e
+  salva solo quando confermo. Niente AI.
+- **Database** (`supabase`): fa i conti lui. Saldi, chiusure di cassa e correzioni
+  passano da funzioni SQL; i client non scrivono mai direttamente nelle tabelle.
+- **Dashboard** (`apps/web`): saldi, entrate e uscite per giorno, settimana, mese
+  o anno, torta delle categorie, calendario e tabella dei movimenti. Si entra con
+  email, password e codice Authenticator.
+- **Dominio** (`packages/domain`): parser, categorie e importi condivisi.
 
-Controlla conto, categoria, importo e data, poi conferma o modifica il riepilogo.
-`/menu` avvia l’inserimento guidato, `/saldi` legge i saldi, `/movimenti` apre lo
-storico e `/riconcilia` chiude una giornata Contanti. `/cancel` chiude il flusso.
-Un trasferimento sposta fondi tra i conti, senza diventare un’entrata o un’uscita.
-Il bot registra operazioni: non muove denaro presso le banche.
-Dettagli nella [guida Telegram](docs/bot-guide.md).
+## A che punto sono
 
-## Avvio locale
+- Il bot è in uso e gira su un mio VPS dentro un container Podman.
+- La dashboard gira in locale e legge dal database. Non è ancora online.
+- Prossimi passi: collaudo completo della dashboard, pulizia dei dati di prova,
+  messa online.
 
-Serve Node.js aggiornato, almeno 22.12. Esegui dalla root:
+## Usare il bot
+
+```text
+ieri 12,50 spesa isybank
+100 stipendio revolut
+50 da revolut a contanti
+```
+
+`/menu` apre l’inserimento guidato, `/saldi` mostra i saldi, `/movimenti` lo
+storico (da lì si modifica o si annulla un movimento), `/riconcilia` chiude la
+giornata dei contanti, `/cancel` esce. Il bot registra soltanto: non muove soldi
+in banca. Il resto è nella [guida del bot](docs/bot-guide.md).
+
+## Avvio in locale
+
+Serve Node.js 22.12 o successivo.
 
 ```bash
 npm ci
-npm run build
-npm run bot:dev
+npm run bot:dev   # bot in polling
+npm run web:dev   # dashboard su http://127.0.0.1:5173/
 ```
 
-Per il bot crea privatamente `.env.local` da `.env.example`, senza sovrascrivere
-un file già presente. Prepara utente, conti EUR e aperture verificate seguendo la
-[guida Supabase](supabase/README.md). Il comando non applica migrazioni.
-Il bot resta attivo finché il processo e la connessione sono disponibili;
-per fermarlo premi Ctrl+C. Dopo una modifica al codice fermalo e riavvialo.
+Il bot legge `.env.local` nella root (parti da `.env.example`), la dashboard
+legge `apps/web/.env.local`: sono due file diversi e non vanno mescolati.
+Il database va preparato a mano seguendo la [guida Supabase](supabase/README.md);
+per la dashboard c’è la [guida web](apps/web/README.md).
 
-Per la dashboard, in un altro terminale:
-
-```bash
-npm run web:dev
-```
-
-Configura prima le variabili pubbliche in `apps/web/.env.local` seguendo la
-[guida web](apps/web/README.md), senza copiare il file privato del bot.
-Apri `http://127.0.0.1:5173/`: `/accesso` richiede un account Supabase autorizzato.
-
-## Variabili d’ambiente del bot
-
-| Variabile | Uso |
+| Variabile del bot | Uso |
 | --- | --- |
 | `TELEGRAM_BOT_TOKEN` | Token del bot |
-| `TELEGRAM_ALLOWED_CHAT_ID` | ID della chat privata autorizzata |
-| `SUPABASE_URL` | Endpoint HTTPS, senza credenziali nell’URL |
-| `SUPABASE_ANON_KEY` | Chiave pubblica; mai secret/service role |
-| `SUPABASE_USER_EMAIL`, `SUPABASE_USER_PASSWORD` | Utente Auth dedicato |
-| `APP_TIMEZONE` | Predefinito `Europe/Rome`; mantienilo per coerenza con Contanti |
-| `DEFAULT_ACCOUNT` | `revolut`, `isybank` o `contanti`; predefinito `revolut` |
-| `TELEGRAM_WEBHOOK_SECRET` | Solo se usi il webhook al posto del polling |
+| `TELEGRAM_ALLOWED_CHAT_ID` | L’unica chat privata autorizzata |
+| `SUPABASE_URL`, `SUPABASE_ANON_KEY` | Progetto e chiave pubblica, mai la service role |
+| `SUPABASE_USER_EMAIL`, `SUPABASE_USER_PASSWORD` | Utente Auth dedicato al bot |
+| `APP_TIMEZONE` | Predefinito `Europe/Rome`, meglio non cambiarlo |
+| `DEFAULT_ACCOUNT` | `revolut` (predefinito), `isybank` o `contanti` |
+| `TELEGRAM_WEBHOOK_SECRET` | Solo se si usa il webhook al posto del polling |
 
-Le variabili della shell hanno precedenza su `.env.local`. Non pubblicare segreti,
-ID personali, saldi o esportazioni reali: vedi [sicurezza](SECURITY.md).
+## Limiti che conosco
 
-## Limiti noti
+- Una sola istanza del bot alla volta. Le bozze non confermate stanno in memoria:
+  scadono dopo 30 minuti e si perdono al riavvio.
+- Dopo un timeout si riprova dallo stesso pulsante. Riscrivere il messaggio
+  crea un secondo movimento.
+- I saldi iniziali dei conti si impostano a mano nel database. Un conto senza
+  saldo iniziale risulta "non disponibile", non zero.
+- Una giornata di contanti chiusa non si riapre.
+- Non ho ancora provato un ripristino completo da backup.
+- La release v1.0.0 ha un difetto sui messaggi modificati, corretto nel codice
+  successivo.
 
-- Usa una sola istanza di polling, senza webhook attivo. Bozze e offset sono in memoria; le bozze scadono dopo 30 minuti e si perdono al riavvio. Le risposte Telegram possono mancare o duplicarsi anche con una scrittura riuscita.
-- Dopo un timeout ritenta dallo stesso pulsante: un nuovo messaggio è una nuova operazione. Annullare il flusso non annulla una scrittura già riuscita. Lo storico precedente alla migrazione 006 non ha la stessa protezione dai duplicati; con 009 le nuove scritture applicative passano soltanto dalle RPC.
-- Le aperture sono manuali. Un saldo non configurato non vale zero. Le giornate Contanti chiuse non si possono riaprire; le correzioni mantengono il tipo del movimento e l’annullamento lo esclude anche dai saldi storici.
-- Lo schema remoto e Auth/RLS non sono stati verificati da questa pulizia. Non è documentata una prova completata di backup/ripristino. Le [verifiche locali](docs/ci.md) non sostituiscono queste prove o il collaudo Telegram reale.
-- La versione pubblicata v1.0.0 conserva un problema con le modifiche a messaggi estranei; il codice locale lo corregge. Per compilare i campi invia nuove risposte e controlla sempre il riepilogo.
-- Il recupero password dalla dashboard e la sezione Budget sono indisponibili.
+Altro: [architettura](docs/architecture.md), [sicurezza](SECURITY.md),
+[test e CI](docs/ci.md).
